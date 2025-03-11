@@ -28,9 +28,8 @@ function App() {
       const savedPage = localStorage.getItem('dohaCurrentPage');
       return savedPage ? parseInt(savedPage, 10) : 0;
     } catch (error) {
-      console.error("App: Error loading current page from localStorage:", error);
       return 0;
-    }
+    } 
   });
   
   const [itineraryData, setItineraryData] = useState<ItineraryData>(() => {
