@@ -258,6 +258,8 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
     setSearchValue('');
   };
 
+  const apiKey = process.env.REACT_APP_GOOGLE_API_KEY || '';
+
   return (
     <Box sx={{ pb: 2 }}>
       {/* Header */}
@@ -588,13 +590,13 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
                 >
                   {/* Replace YOUR_API_KEY with your actual Google Maps API key */}
                   <img 
-                    src="https://maps.googleapis.com/maps/api/staticmap?center=Doha,Qatar&zoom=11&size=200x200&scale=2&maptype=roadmap&path=color:0x3366FF|weight:3|25.2854,51.5310|25.3548,51.4244|25.2948,51.5310|25.3090,51.5132&markers=color:red|25.2854,51.5310&key=AIzaSyDU0FvhcGZV1W8eo2vsbEidq0OCt_T6_i4" 
+                    src={`https://maps.googleapis.com/maps/api/staticmap?center=Doha,Qatar&zoom=11&size=200x200&scale=2&maptype=roadmap&path=color:0x3366FF|weight:3|25.2854,51.5310|25.3548,51.4244|25.2948,51.5310|25.3090,51.5132&markers=color:red|25.2854,51.5310&key=${apiKey}`}
                     alt="Doha Route Map"
                     style={{ 
                       width: '100%', 
-                      height: '100%', 
-                      objectFit: 'cover',
-                      display: 'block'
+                      height: 'auto', 
+                      borderRadius: '8px',
+                      marginTop: '16px'
                     }}
                   />
                 </Box>
