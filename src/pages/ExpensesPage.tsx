@@ -31,8 +31,6 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ReceiptIcon from '@mui/icons-material/Receipt';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import PersonIcon from '@mui/icons-material/Person';
 
 // Define interfaces for our data
 interface Expense {

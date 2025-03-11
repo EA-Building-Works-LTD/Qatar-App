@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CssBaseline, Box, Paper, BottomNavigation, BottomNavigationAction } from '@mui/material';
 import { dohaItinerary, ItineraryData } from './data/itineraryData';
 import HomeIcon from '@mui/icons-material/Home';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+
 import InfoIcon from '@mui/icons-material/Info';
 import PersonIcon from '@mui/icons-material/Person';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
