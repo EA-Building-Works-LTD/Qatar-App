@@ -51,11 +51,31 @@ code {
 /* Add iOS-like styling for mobile */
 @media (max-width: 600px) {
   .MuiBottomNavigation-root {
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: env(safe-area-inset-bottom, 16px);
+    height: auto !important;
   }
   
   .MuiContainer-root {
     padding-left: 16px;
     padding-right: 16px;
+  }
+  
+  /* Add extra padding to the bottom of the page content to prevent content from being hidden behind the navbar */
+  body {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 16px));
+  }
+  
+  /* Improve bottom navigation appearance */
+  .MuiBottomNavigationAction-root {
+    padding-top: 12px !important;
+  }
+  
+  .MuiBottomNavigationAction-label {
+    opacity: 1 !important;
+    transition: none !important;
+  }
+  
+  .MuiBottomNavigation-root .Mui-selected {
+    font-weight: 600 !important;
   }
 }

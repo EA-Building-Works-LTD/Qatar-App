@@ -154,7 +154,7 @@ function App() {
         display: 'flex', 
         flexDirection: 'column', 
         minHeight: '100vh',
-        pb: 8, // Add padding for bottom navigation
+        pb: { xs: '110px', sm: '80px' }, // Increased padding for the taller navbar
       }}>
         {renderPage()}
         
@@ -167,6 +167,7 @@ function App() {
             zIndex: 1000,
             borderRadius: 0,
             boxShadow: '0px -2px 10px rgba(0, 0, 0, 0.05)',
+            paddingBottom: { xs: '16px', sm: '0' }, // Increased padding at the bottom for mobile
           }} 
           elevation={3}
         >
@@ -175,6 +176,21 @@ function App() {
             value={currentPage}
             onChange={(event, newValue) => {
               setCurrentPage(newValue);
+            }}
+            sx={{
+              height: { xs: '80px', sm: '60px' }, // Increased height on mobile
+              '& .MuiBottomNavigationAction-root': {
+                paddingBottom: { xs: '12px', sm: '6px' }, // Increased padding to the action items
+                minWidth: 'auto',
+                '& .MuiSvgIcon-root': {
+                  fontSize: '24px', // Slightly larger icons
+                  marginBottom: '4px', // More space between icon and label
+                },
+                '& .MuiBottomNavigationAction-label': {
+                  fontSize: '0.75rem', // Ensure label text is readable
+                  fontWeight: 500,
+                }
+              }
             }}
           >
             <BottomNavigationAction label="Home" icon={<HomeIcon />} />
