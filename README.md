@@ -1,46 +1,80 @@
-# Getting Started with Create React App
+# Doha Itinerary App
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A React application for planning and managing your Doha itinerary.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+- Plan your daily activities in Doha
+- Track expenses
+- View your itinerary in a calendar format
+- Dark mode support
+- Mobile-friendly design
 
-### `npm start`
+## Getting Started
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+### Prerequisites
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+- Node.js (v14 or higher)
+- npm (v6 or higher)
 
-### `npm test`
+### Installation
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+1. Clone the repository
+```
+git clone <repository-url>
+```
 
-### `npm run build`
+2. Install dependencies
+```
+npm install
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+3. Start the development server
+```
+npm start
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+The app will be available at [http://localhost:3000](http://localhost:3000).
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Deployment
 
-### `npm run eject`
+This app is configured for easy deployment to Vercel. Follow these steps to deploy:
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+### Option 1: Deploy from the command line
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+1. Make sure you have the Vercel CLI installed:
+```
+npm install -g vercel
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+2. Login to Vercel:
+```
+vercel login
+```
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+3. Deploy the app:
+```
+npm run deploy
+```
 
-## Learn More
+### Option 2: Deploy directly from GitHub
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+1. Push your code to a GitHub repository
+2. Go to [Vercel](https://vercel.com) and sign up/login
+3. Click "New Project" and import your GitHub repository
+4. Configure the project settings (the defaults should work fine)
+5. Click "Deploy"
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## Development
+
+- `npm start` - Start the development server
+- `npm test` - Run tests
+- `npm run build` - Build the app for production
+- `npm run deploy` - Deploy to Vercel
+
+## Technologies Used
+
+- React
+- TypeScript
+- Material-UI
+- Vercel (deployment)
