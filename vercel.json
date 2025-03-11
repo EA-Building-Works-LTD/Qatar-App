@@ -15,8 +15,8 @@
       "dest": "/static/$1"
     },
     {
-      "src": "/favicon.ico",
-      "dest": "/favicon.ico"
+      "src": "/favicon_app.ico",
+      "dest": "/favicon_app.ico"
     },
     {
       "src": "/manifest.json",
