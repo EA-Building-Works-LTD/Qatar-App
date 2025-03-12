@@ -20,18 +20,52 @@ firebase.initializeApp({
 // Retrieve an instance of Firebase Messaging so that it can handle background messages.
 const messaging = firebase.messaging();
 
+// Log when the service worker is installed
+self.addEventListener('install', (event) => {
+  console.log('Service Worker installed');
+  self.skipWaiting();
+});
+
+// Log when the service worker is activated
+self.addEventListener('activate', (event) => {
+  console.log('Service Worker activated');
+  return self.clients.claim();
+});
+
 // Handle background messages
 messaging.onBackgroundMessage((payload) => {
-  console.log('Received background message:', payload);
+  console.log('[firebase-messaging-sw.js] Received background message:', payload);
 
-  const notificationTitle = payload.notification.title;
+  const notificationTitle = payload.notification.title || 'New Notification';
   const notificationOptions = {
-    body: payload.notification.body,
-    icon: '/logo192.png', // Add your app icon path here
+    body: payload.notification.body || '',
+    icon: '/logo192.png',
     badge: '/logo192.png',
     tag: 'place-added',
-    data: payload.data
+    data: payload.data || {}
   };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+  return self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+// Handle notification clicks
+self.addEventListener('notificationclick', (event) => {
+  console.log('[firebase-messaging-sw.js] Notification clicked:', event);
+  
+  event.notification.close();
+  
+  // This looks to see if the current is already open and focuses if it is
+  event.waitUntil(
+    clients.matchAll({
+      type: "window"
+    })
+    .then((clientList) => {
+      for (const client of clientList) {
+        if (client.url === '/' && 'focus' in client)
+          return client.focus();
+      }
+      if (clients.openWindow)
+        return clients.openWindow('/');
+    })
+  );
 }); 

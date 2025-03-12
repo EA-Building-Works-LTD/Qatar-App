@@ -4,6 +4,8 @@ import { ref, onValue, set, get, DataSnapshot, DatabaseReference } from 'firebas
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { ItineraryData, dohaItinerary } from '../data/itineraryData';
 import { requestNotificationPermission } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../firebase';
 
 // Define Note type
 export interface Note {
@@ -421,36 +423,65 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
     }
   };
 
+  // Request notification permission when user logs in
+  useEffect(() => {
+    if (currentUser && notificationSettings.push) {
+      console.log('Requesting notification permission for user:', currentUser.email);
+      requestNotificationPermission()
+        .then(token => {
+          console.log('FCM Token received:', token);
+          if (!token) {
+            console.warn('No FCM token received');
+          }
+        })
+        .catch(err => {
+          console.error('Error requesting notification permission:', err);
+        });
+    }
+  }, [currentUser, notificationSettings.push]);
+
   // Function to send notification to all users except the author
   const sendNotificationToUsers = async (noteAuthor: string, noteText: string) => {
     try {
+      console.log('Attempting to send notifications for new note by:', noteAuthor);
+      
       // Get all users
       const usersRef = ref(database, 'users');
       const snapshot = await get(usersRef);
       
       if (snapshot.exists()) {
         const users = snapshot.val();
+        console.log('Found users:', Object.keys(users).length);
         
         // For each user that has a FCM token
         Object.entries(users).forEach(async ([userId, userData]: [string, any]) => {
-          if (userData.fcmToken && userData.userProfile.email !== noteAuthor) {
-            // Send notification using Firebase Cloud Functions (you'll need to implement this)
-            const notificationData = {
-              token: userData.fcmToken,
-              notification: {
-                title: `New Place Added`,
-                body: `${noteAuthor} added "${noteText}" to places to visit`
-              }
-            };
+          console.log('Checking user:', userData.userProfile?.email, 'FCM Token:', userData.fcmToken ? 'Present' : 'Missing');
+          
+          if (userData.fcmToken && userData.userProfile?.email !== noteAuthor) {
+            console.log('Sending notification to:', userData.userProfile?.email);
             
-            // You'll need to create a Firebase Cloud Function to handle this
-            // For now, we'll just log it
-            console.log('Would send notification:', notificationData);
+            try {
+              // Call the Firebase Cloud Function
+              const sendNotificationFn = httpsCallable(functions, 'sendNotification');
+              const result = await sendNotificationFn({
+                token: userData.fcmToken,
+                notification: {
+                  title: `New Place Added`,
+                  body: `${noteAuthor} added "${noteText}" to places to visit`
+                }
+              });
+              
+              console.log('Notification sent successfully:', result);
+            } catch (error) {
+              console.error('Error calling sendNotification function:', error);
+            }
           }
         });
+      } else {
+        console.log('No users found in database');
       }
     } catch (err) {
-      console.error('Error sending notifications:', err);
+      console.error('Error in sendNotificationToUsers:', err);
     }
   };
 
@@ -465,7 +496,7 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       }
       
       const newId = notes.length > 0 ? Math.max(...notes.map(note => note.id)) + 1 : 1;
-      const updatedNotes = [...notes, { 
+      const newNote = { 
         id: newId, 
         text, 
         completed: false,
@@ -473,19 +504,18 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
           name: currentUser.displayName || 'Anonymous',
           email: currentUser.email || ''
         }
-      }];
+      };
       
       // Update shared notes
       const sharedNotesRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/notes`);
-      await set(sharedNotesRef, updatedNotes);
-      
-      // Send notifications to other users
-      await sendNotificationToUsers(
-        currentUser.email || 'Anonymous',
-        text
-      );
+      await set(sharedNotesRef, [...notes, newNote]);
       
       console.log("Shared note successfully added to Firebase");
+      
+      // Instead of calling a Cloud Function, we'll just log that a notification would be sent
+      // In a production app, you would use a server-side solution for this
+      console.log(`A notification would be sent to all users about: ${currentUser.displayName || 'Anonymous'} added "${text}" to places to visit`);
+      
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error("Error adding note:", errorMessage);
@@ -580,15 +610,6 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       // Don't throw the error, just log it
     }
   };
-
-  // Request notification permission when user logs in
-  useEffect(() => {
-    if (currentUser && notificationSettings.push) {
-      requestNotificationPermission().catch(err => {
-        console.error('Error requesting notification permission:', err);
-      });
-    }
-  }, [currentUser, notificationSettings.push]);
 
   const value = {
     itineraryData,

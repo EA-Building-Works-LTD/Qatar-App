@@ -98,7 +98,7 @@ const ProfilePage: React.FC = () => {
   // State for snackbar
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
-  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info'>('success');
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info' | 'warning'>('success');
 
   // Handle edit profile dialog
   const handleEditProfileOpen = () => {
@@ -154,6 +154,22 @@ const ProfilePage: React.FC = () => {
       
       await updateNotificationSettings(updatedSettings);
       
+      // If enabling push notifications, request permission
+      if (setting === 'push' && updatedSettings.push) {
+        try {
+          const permission = await Notification.requestPermission();
+          console.log('Notification permission:', permission);
+          
+          if (permission === 'granted') {
+            setSnackbarMessage('Push notifications enabled');
+          } else {
+            setSnackbarMessage('Push notification permission denied');
+          }
+        } catch (err) {
+          console.error('Error requesting notification permission:', err);
+        }
+      }
+      
       setSnackbarMessage(`${setting.charAt(0).toUpperCase() + setting.slice(1)} notifications ${updatedSettings[setting] ? 'enabled' : 'disabled'}`);
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
@@ -161,6 +177,37 @@ const ProfilePage: React.FC = () => {
       console.error('Error updating notification settings:', error);
       setSnackbarMessage('Failed to update notification settings');
       setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    }
+  };
+
+  // Test notification
+  const handleTestNotification = () => {
+    if (!('Notification' in window)) {
+      setSnackbarMessage('This browser does not support notifications');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+    
+    if (Notification.permission === 'granted') {
+      // Create and show a test notification
+      const notification = new Notification('Test Notification', {
+        body: 'This is a test notification from Doha Itinerary',
+        icon: '/logo192.png'
+      });
+      
+      notification.onclick = () => {
+        console.log('Notification clicked');
+        window.focus();
+      };
+      
+      setSnackbarMessage('Test notification sent');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+    } else {
+      setSnackbarMessage('Notification permission not granted');
+      setSnackbarSeverity('warning');
       setSnackbarOpen(true);
     }
   };
@@ -565,6 +612,24 @@ const ProfilePage: React.FC = () => {
             <Typography variant="caption" color="text.secondary" sx={{ ml: 4, mt: -1, mb: 2 }}>
               Receive updates about new features and improvements
             </Typography>
+
+            {/* Test Notification Button */}
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={handleTestNotification}
+                disabled={Notification.permission !== 'granted'}
+                sx={{ mt: 1 }}
+              >
+                Test Notification
+              </Button>
+            </Box>
+            {Notification.permission !== 'granted' && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, textAlign: 'center', display: 'block' }}>
+                Enable push notifications above to test
+              </Typography>
+            )}
           </FormGroup>
         </DialogContent>
         <DialogActions>
