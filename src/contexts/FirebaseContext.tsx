@@ -3,12 +3,17 @@ import { database, auth } from '../firebase';
 import { ref, onValue, set, get, DataSnapshot, DatabaseReference } from 'firebase/database';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { ItineraryData, dohaItinerary } from '../data/itineraryData';
+import { requestNotificationPermission } from '../firebase';
 
 // Define Note type
 export interface Note {
   id: number;
   text: string;
   completed: boolean;
+  author: {
+    name: string;
+    email: string;
+  };
 }
 
 // Define UserProfile type
@@ -416,7 +421,40 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
     }
   };
 
-  // Function to add a new note (now updates shared data)
+  // Function to send notification to all users except the author
+  const sendNotificationToUsers = async (noteAuthor: string, noteText: string) => {
+    try {
+      // Get all users
+      const usersRef = ref(database, 'users');
+      const snapshot = await get(usersRef);
+      
+      if (snapshot.exists()) {
+        const users = snapshot.val();
+        
+        // For each user that has a FCM token
+        Object.entries(users).forEach(async ([userId, userData]: [string, any]) => {
+          if (userData.fcmToken && userData.userProfile.email !== noteAuthor) {
+            // Send notification using Firebase Cloud Functions (you'll need to implement this)
+            const notificationData = {
+              token: userData.fcmToken,
+              notification: {
+                title: `New Place Added`,
+                body: `${noteAuthor} added "${noteText}" to places to visit`
+              }
+            };
+            
+            // You'll need to create a Firebase Cloud Function to handle this
+            // For now, we'll just log it
+            console.log('Would send notification:', notificationData);
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error sending notifications:', err);
+    }
+  };
+
+  // Function to add a new note (now updates shared data and sends notifications)
   const addNote = async (text: string): Promise<void> => {
     try {
       if (text.trim() === '') return;
@@ -427,12 +465,26 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       }
       
       const newId = notes.length > 0 ? Math.max(...notes.map(note => note.id)) + 1 : 1;
-      const updatedNotes = [...notes, { id: newId, text, completed: false }];
+      const updatedNotes = [...notes, { 
+        id: newId, 
+        text, 
+        completed: false,
+        author: {
+          name: currentUser.displayName || 'Anonymous',
+          email: currentUser.email || ''
+        }
+      }];
       
       // Update shared notes
       const sharedNotesRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/notes`);
       await set(sharedNotesRef, updatedNotes);
-      // No need to update local state here as the onValue listener will handle it
+      
+      // Send notifications to other users
+      await sendNotificationToUsers(
+        currentUser.email || 'Anonymous',
+        text
+      );
+      
       console.log("Shared note successfully added to Firebase");
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
@@ -528,6 +580,15 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       // Don't throw the error, just log it
     }
   };
+
+  // Request notification permission when user logs in
+  useEffect(() => {
+    if (currentUser && notificationSettings.push) {
+      requestNotificationPermission().catch(err => {
+        console.error('Error requesting notification permission:', err);
+      });
+    }
+  }, [currentUser, notificationSettings.push]);
 
   const value = {
     itineraryData,

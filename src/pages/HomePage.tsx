@@ -713,16 +713,29 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
                         },
                       }}
                     />
-                    <Typography 
-                      variant="body1" 
-                      sx={{ 
-                        flex: 1,
-                        textDecoration: note.completed ? 'line-through' : 'none',
-                        color: note.completed ? 'text.secondary' : 'text.primary'
-                      }}
-                    >
-                      {note.text}
-                    </Typography>
+                    <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          textDecoration: note.completed ? 'line-through' : 'none',
+                          color: note.completed ? 'text.secondary' : 'text.primary'
+                        }}
+                      >
+                        {note.text}
+                      </Typography>
+                      <Chip
+                        label={note.author?.name || 'Anonymous'}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(51, 102, 255, 0.1)',
+                          color: 'primary.main',
+                          fontWeight: 500,
+                          fontSize: '0.75rem',
+                          height: '24px',
+                          borderRadius: '12px'
+                        }}
+                      />
+                    </Box>
                     <IconButton 
                       size="small" 
                       onClick={() => handleDeleteNote(note.id)}
