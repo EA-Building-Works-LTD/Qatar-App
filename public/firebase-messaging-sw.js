@@ -20,6 +20,9 @@ firebase.initializeApp({
 // Retrieve an instance of Firebase Messaging so that it can handle background messages.
 const messaging = firebase.messaging();
 
+// Keep track of displayed notifications to prevent duplicates
+const displayedNotifications = new Set();
+
 // Log when the service worker is installed
 self.addEventListener('install', (event) => {
   console.log('[firebase-messaging-sw.js] Service Worker installed');
@@ -38,12 +41,23 @@ self.addEventListener('message', (event) => {
   
   if (event.data && event.data.type === 'SEND_NOTIFICATION') {
     const payload = event.data.payload;
+    const notificationId = payload.tag || `notification-${Date.now()}`;
     
+    // Check if we've already shown this notification
+    if (displayedNotifications.has(notificationId)) {
+      console.log('[firebase-messaging-sw.js] Notification already displayed:', notificationId);
+      return;
+    }
+    
+    // Add to our tracking set
+    displayedNotifications.add(notificationId);
+    
+    // Show the notification
     self.registration.showNotification(payload.title, {
       body: payload.body,
       icon: payload.icon || '/logo192.png',
       badge: '/logo192.png',
-      tag: 'place-added',
+      tag: notificationId,
       data: payload.data || {}
     });
     
@@ -56,11 +70,23 @@ messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Received background message:', payload);
 
   const notificationTitle = payload.notification.title || 'New Notification';
+  const notificationBody = payload.notification.body || '';
+  const notificationId = payload.data?.notificationId || `fcm-${Date.now()}`;
+  
+  // Check if we've already shown this notification
+  if (displayedNotifications.has(notificationId)) {
+    console.log('[firebase-messaging-sw.js] FCM notification already displayed:', notificationId);
+    return;
+  }
+  
+  // Add to our tracking set
+  displayedNotifications.add(notificationId);
+
   const notificationOptions = {
-    body: payload.notification.body || '',
+    body: notificationBody,
     icon: '/logo192.png',
     badge: '/logo192.png',
-    tag: 'place-added',
+    tag: notificationId,
     data: payload.data || {}
   };
 

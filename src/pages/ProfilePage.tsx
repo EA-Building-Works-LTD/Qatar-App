@@ -40,6 +40,8 @@ import SecurityIcon from '@mui/icons-material/Security';
 import { useTheme } from '../contexts/ThemeContext';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { useNavigate } from 'react-router-dom';
+import { ref, get, set } from 'firebase/database';
+import { database } from '../firebase';
 
 // Define user profile interface
 interface UserProfile {
@@ -182,7 +184,7 @@ const ProfilePage: React.FC = () => {
   };
 
   // Test notification
-  const handleTestNotification = () => {
+  const handleTestNotification = async () => {
     if (!('Notification' in window)) {
       setSnackbarMessage('This browser does not support notifications');
       setSnackbarSeverity('error');
@@ -191,20 +193,57 @@ const ProfilePage: React.FC = () => {
     }
     
     if (Notification.permission === 'granted') {
-      // Create and show a test notification
-      const notification = new Notification('Test Notification', {
-        body: 'This is a test notification from Doha Itinerary',
-        icon: '/logo192.png'
-      });
-      
-      notification.onclick = () => {
-        console.log('Notification clicked');
-        window.focus();
-      };
-      
-      setSnackbarMessage('Test notification sent');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
+      try {
+        // Create and show a test notification with a unique tag
+        const notification = new Notification('Test Notification', {
+          body: 'This is a test notification from Doha Itinerary',
+          icon: '/logo192.png',
+          tag: 'test-notification-' + Date.now() // Ensure uniqueness
+        });
+        
+        notification.onclick = () => {
+          console.log('Notification clicked');
+          window.focus();
+        };
+        
+        // Also store the test notification in the user's notifications in Firebase
+        if (currentUser) {
+          try {
+            const userId = currentUser.uid;
+            const notificationsRef = ref(database, `users/${userId}/notifications`);
+            const snapshot = await get(notificationsRef);
+            
+            let notifications = [];
+            if (snapshot.exists()) {
+              notifications = snapshot.val();
+            }
+            
+            // Add the test notification
+            const testNotification = {
+              id: Date.now(),
+              title: 'Test Notification',
+              body: 'This is a test notification from Doha Itinerary',
+              timestamp: new Date().toISOString(),
+              read: true // Mark as read since we already displayed it
+            };
+            
+            await set(notificationsRef, [...notifications, testNotification]);
+            console.log('Test notification stored in Firebase');
+          } catch (error) {
+            console.error('Error storing test notification:', error);
+          }
+        }
+        
+        setSnackbarMessage('Test notification sent');
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+      } catch (error: unknown) {
+        console.error('Error sending test notification:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        setSnackbarMessage('Error sending test notification: ' + errorMessage);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      }
     } else {
       setSnackbarMessage('Notification permission not granted');
       setSnackbarSeverity('warning');

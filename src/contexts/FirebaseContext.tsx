@@ -218,6 +218,50 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
           console.error("Error loading preferences:", error);
         });
         
+        // Set up listener for user notifications
+        const userNotificationsRef = ref(database, `users/${userId}/notifications`);
+        const userNotificationsUnsubscribe = onValue(userNotificationsRef, (snapshot) => {
+          if (snapshot.exists()) {
+            const notifications = snapshot.val();
+            
+            // Check for unread notifications and display them
+            const unreadNotifications = notifications.filter((notification: any) => !notification.read);
+            
+            if (unreadNotifications.length > 0 && 'Notification' in window && Notification.permission === 'granted') {
+              // Display the most recent unread notification
+              const latestNotification = unreadNotifications[unreadNotifications.length - 1];
+              
+              try {
+                const notification = new Notification(latestNotification.title, {
+                  body: latestNotification.body,
+                  icon: '/logo192.png',
+                  tag: `stored-notification-${latestNotification.id}`
+                });
+                
+                notification.onclick = () => {
+                  window.focus();
+                };
+                
+                console.log('Displayed stored notification:', latestNotification.body);
+                
+                // Mark notifications as read
+                const updatedNotifications = notifications.map((notification: any) => ({
+                  ...notification,
+                  read: true
+                }));
+                
+                set(userNotificationsRef, updatedNotifications).catch(err => {
+                  console.error("Error marking notifications as read:", err);
+                });
+              } catch (error) {
+                console.error('Error displaying stored notification:', error);
+              }
+            }
+          }
+        }, (error) => {
+          console.error("Error loading user notifications:", error);
+        });
+        
         // Set up listener for shared notes (instead of user-specific notes)
         const sharedNotesRef = ref(database, `shared/${SHARED_TRIP_ID}/notes`);
         const notesUnsubscribe = onValue(sharedNotesRef, (snapshot) => {
@@ -286,6 +330,7 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
           notesUnsubscribe();
           expensesUnsubscribe();
           itineraryUnsubscribe();
+          userNotificationsUnsubscribe();
           unsubscribe();
         };
       }
@@ -467,38 +512,38 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         
         // For each user
         Object.entries(users).forEach(async ([userId, userData]: [string, any]) => {
-          console.log('Checking user:', userData.userProfile?.email, 'FCM Token:', userData.fcmToken ? 'Present' : 'Missing');
-          
           // Skip the author
           if (userData.userProfile?.email === noteAuthor) {
             console.log('Skipping notification to author:', noteAuthor);
             return;
           }
           
-          // Try to send a direct browser notification if we're on the same device
-          if ('Notification' in window && Notification.permission === 'granted') {
-            try {
-              // Create a notification
-              const notification = new Notification('New Place Added', {
-                body: `${noteAuthor} added "${noteText}" to places to visit`,
-                icon: '/logo192.png'
-              });
-              
-              notification.onclick = () => {
-                window.focus();
-              };
-              
-              console.log('Direct browser notification sent to current device');
-            } catch (error) {
-              console.error('Error sending direct notification:', error);
-            }
-          }
+          console.log('Preparing notification for user:', userData.userProfile?.email);
           
-          // If the user has an FCM token, we would normally send a push notification
-          // through Firebase Cloud Functions, but since we're having deployment issues,
-          // we'll just log it for now
-          if (userData.fcmToken) {
-            console.log(`Would send FCM notification to ${userData.userProfile?.email} with token: ${userData.fcmToken.substring(0, 10)}...`);
+          // Store the notification in the database for this user
+          // This will trigger a notification on their device when they next open the app
+          try {
+            const notificationsRef = ref(database, `users/${userId}/notifications`);
+            const notificationsSnapshot = await get(notificationsRef);
+            
+            let notifications = [];
+            if (notificationsSnapshot.exists()) {
+              notifications = notificationsSnapshot.val();
+            }
+            
+            // Add the new notification
+            const newNotification = {
+              id: Date.now(),
+              title: 'New Place Added',
+              body: `${noteAuthor} added "${noteText}" to places to visit`,
+              timestamp: new Date().toISOString(),
+              read: false
+            };
+            
+            await set(notificationsRef, [...notifications, newNotification]);
+            console.log(`Notification stored for user: ${userData.userProfile?.email}`);
+          } catch (error) {
+            console.error(`Error storing notification for user: ${userData.userProfile?.email}`, error);
           }
         });
       } else {
@@ -536,13 +581,14 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       
       console.log("Shared note successfully added to Firebase");
       
-      // Send direct browser notification to all users on this device
+      // Send a single notification on the current device
       if ('Notification' in window && Notification.permission === 'granted') {
         try {
-          // Create a notification
+          // Create a notification with a unique tag to prevent duplicates
           const notification = new Notification('New Place Added', {
             body: `${currentUser.displayName || 'Someone'} added "${text}" to places to visit`,
-            icon: '/logo192.png'
+            icon: '/logo192.png',
+            tag: `new-place-${newId}` // Using a unique tag prevents duplicate notifications
           });
           
           notification.onclick = () => {
@@ -555,7 +601,7 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         }
       }
       
-      // Also try to send notifications to other users via Firebase
+      // Store notifications for other users
       try {
         await sendNotificationToUsers(
           currentUser.email || 'Anonymous',
