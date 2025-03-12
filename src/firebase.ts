@@ -42,6 +42,28 @@ export const requestNotificationPermission = async () => {
       return null;
     }
 
+    // Check if permission is already denied
+    if (Notification.permission === 'denied') {
+      console.warn('Notification permission was previously denied');
+      
+      // Show instructions on how to enable notifications based on browser
+      const ua = navigator.userAgent;
+      let instructions = '';
+      
+      if (ua.includes('Chrome')) {
+        instructions = 'To enable notifications in Chrome: Click the lock icon in the address bar → Site settings → Notifications → Allow';
+      } else if (ua.includes('Firefox')) {
+        instructions = 'To enable notifications in Firefox: Click the lock icon in the address bar → Connection secure → More information → Permissions → Notifications → Allow';
+      } else if (ua.includes('Safari')) {
+        instructions = 'To enable notifications in Safari: Safari menu → Preferences → Websites → Notifications → Allow for this website';
+      } else {
+        instructions = 'Please check your browser settings to enable notifications for this site';
+      }
+      
+      console.info('How to enable notifications:', instructions);
+      return null;
+    }
+
     // Request permission
     console.log('Requesting notification permission...');
     const permission = await Notification.requestPermission();
@@ -85,6 +107,9 @@ export const requestNotificationPermission = async () => {
         console.error('Error getting FCM token:', tokenError);
         return null;
       }
+    } else if (permission === 'denied') {
+      console.warn('Notification permission denied by user');
+      return null;
     } else {
       console.warn(`Notification permission ${permission}`);
       return null;

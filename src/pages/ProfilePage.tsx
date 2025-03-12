@@ -613,6 +613,47 @@ const ProfilePage: React.FC = () => {
               Receive updates about new features and improvements
             </Typography>
 
+            {/* Notification Permission Guide */}
+            {Notification.permission === 'denied' && (
+              <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(255, 0, 0, 0.05)', borderRadius: 2 }}>
+                <Typography variant="subtitle2" color="error" sx={{ fontWeight: 600, mb: 1 }}>
+                  Notifications are blocked
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  You need to enable notifications in your browser settings to receive alerts when new places are added.
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  How to enable notifications:
+                </Typography>
+                <List dense>
+                  <ListItem>
+                    <ListItemText 
+                      primary="Chrome" 
+                      secondary="Click the lock icon in the address bar → Site settings → Notifications → Allow" 
+                    />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemText 
+                      primary="Firefox" 
+                      secondary="Click the lock icon → Connection secure → More information → Permissions → Notifications → Allow" 
+                    />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemText 
+                      primary="Safari" 
+                      secondary="Safari menu → Preferences → Websites → Notifications → Allow for this website" 
+                    />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemText 
+                      primary="Mobile Devices" 
+                      secondary="Add to home screen first, then enable notifications in app settings" 
+                    />
+                  </ListItem>
+                </List>
+              </Box>
+            )}
+
             {/* Test Notification Button */}
             <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
               <Button 
@@ -625,7 +666,7 @@ const ProfilePage: React.FC = () => {
                 Test Notification
               </Button>
             </Box>
-            {Notification.permission !== 'granted' && (
+            {Notification.permission !== 'granted' && Notification.permission !== 'denied' && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, textAlign: 'center', display: 'block' }}>
                 Enable push notifications above to test
               </Typography>

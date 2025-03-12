@@ -432,6 +432,18 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
           console.log('FCM Token received:', token);
           if (!token) {
             console.warn('No FCM token received');
+            
+            // Check if permission was denied
+            if (Notification.permission === 'denied') {
+              // Show a snackbar or alert to guide the user on enabling notifications
+              alert('Notifications are blocked. Please enable them in your browser settings to receive notifications when new places are added.');
+              
+              // Update notification settings to reflect the denied state
+              updateNotificationSettings({
+                ...notificationSettings,
+                push: false
+              });
+            }
           }
         })
         .catch(err => {
@@ -453,28 +465,40 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         const users = snapshot.val();
         console.log('Found users:', Object.keys(users).length);
         
-        // For each user that has a FCM token
+        // For each user
         Object.entries(users).forEach(async ([userId, userData]: [string, any]) => {
           console.log('Checking user:', userData.userProfile?.email, 'FCM Token:', userData.fcmToken ? 'Present' : 'Missing');
           
-          if (userData.fcmToken && userData.userProfile?.email !== noteAuthor) {
-            console.log('Sending notification to:', userData.userProfile?.email);
-            
+          // Skip the author
+          if (userData.userProfile?.email === noteAuthor) {
+            console.log('Skipping notification to author:', noteAuthor);
+            return;
+          }
+          
+          // Try to send a direct browser notification if we're on the same device
+          if ('Notification' in window && Notification.permission === 'granted') {
             try {
-              // Call the Firebase Cloud Function
-              const sendNotificationFn = httpsCallable(functions, 'sendNotification');
-              const result = await sendNotificationFn({
-                token: userData.fcmToken,
-                notification: {
-                  title: `New Place Added`,
-                  body: `${noteAuthor} added "${noteText}" to places to visit`
-                }
+              // Create a notification
+              const notification = new Notification('New Place Added', {
+                body: `${noteAuthor} added "${noteText}" to places to visit`,
+                icon: '/logo192.png'
               });
               
-              console.log('Notification sent successfully:', result);
+              notification.onclick = () => {
+                window.focus();
+              };
+              
+              console.log('Direct browser notification sent to current device');
             } catch (error) {
-              console.error('Error calling sendNotification function:', error);
+              console.error('Error sending direct notification:', error);
             }
+          }
+          
+          // If the user has an FCM token, we would normally send a push notification
+          // through Firebase Cloud Functions, but since we're having deployment issues,
+          // we'll just log it for now
+          if (userData.fcmToken) {
+            console.log(`Would send FCM notification to ${userData.userProfile?.email} with token: ${userData.fcmToken.substring(0, 10)}...`);
           }
         });
       } else {
@@ -496,7 +520,7 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       }
       
       const newId = notes.length > 0 ? Math.max(...notes.map(note => note.id)) + 1 : 1;
-      const updatedNotes = [...notes, { 
+      const newNote = { 
         id: newId, 
         text, 
         completed: false,
@@ -504,19 +528,43 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
           name: currentUser.displayName || 'Anonymous',
           email: currentUser.email || ''
         }
-      }];
+      };
       
       // Update shared notes
       const sharedNotesRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/notes`);
-      await set(sharedNotesRef, updatedNotes);
-      
-      // Send notifications to other users
-      await sendNotificationToUsers(
-        currentUser.email || 'Anonymous',
-        text
-      );
+      await set(sharedNotesRef, [...notes, newNote]);
       
       console.log("Shared note successfully added to Firebase");
+      
+      // Send direct browser notification to all users on this device
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          // Create a notification
+          const notification = new Notification('New Place Added', {
+            body: `${currentUser.displayName || 'Someone'} added "${text}" to places to visit`,
+            icon: '/logo192.png'
+          });
+          
+          notification.onclick = () => {
+            window.focus();
+          };
+          
+          console.log('Direct browser notification sent successfully');
+        } catch (notifError) {
+          console.error('Error sending direct notification:', notifError);
+        }
+      }
+      
+      // Also try to send notifications to other users via Firebase
+      try {
+        await sendNotificationToUsers(
+          currentUser.email || 'Anonymous',
+          text
+        );
+      } catch (notificationError) {
+        console.error('Error sending notifications to other users:', notificationError);
+      }
+      
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error("Error adding note:", errorMessage);
