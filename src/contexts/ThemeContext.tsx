@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material';
+import { useFirebase } from './FirebaseContext';
 
 // Create the context
 interface ThemeContextType {
@@ -14,15 +15,17 @@ const ThemeContext = createContext<ThemeContextType>({
 
 // Create the theme provider component
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Get initial dark mode value from localStorage
-  const [darkMode, setDarkMode] = useState(() => {
-    const savedPreferences = localStorage.getItem('dohaPreferences');
-    if (savedPreferences) {
-      const preferences = JSON.parse(savedPreferences);
-      return preferences.darkMode || false;
+  const { preferences, updatePreferences, loading } = useFirebase();
+  
+  // Get dark mode value from Firebase preferences or default to false
+  const [darkMode, setDarkMode] = useState(false);
+  
+  // Update darkMode state when preferences change
+  useEffect(() => {
+    if (preferences && !loading) {
+      setDarkMode(preferences.darkMode);
     }
-    return false;
-  });
+  }, [preferences, loading]);
 
   // Create theme based on dark mode
   const theme = createTheme({
@@ -165,21 +168,17 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Toggle dark mode function
   const toggleDarkMode = () => {
-    setDarkMode((prev: boolean) => !prev);
-  };
-
-  // Update localStorage when dark mode changes
-  useEffect(() => {
-    const savedPreferences = localStorage.getItem('dohaPreferences');
-    const preferences = savedPreferences ? JSON.parse(savedPreferences) : {
-      darkMode: false,
-      language: 'English',
-      sound: true
-    };
+    const newDarkMode = !darkMode;
+    setDarkMode(newDarkMode);
     
-    preferences.darkMode = darkMode;
-    localStorage.setItem('dohaPreferences', JSON.stringify(preferences));
-  }, [darkMode]);
+    // Update preferences in Firebase if available
+    if (preferences && !loading) {
+      updatePreferences({
+        ...preferences,
+        darkMode: newDarkMode
+      });
+    }
+  };
 
   return (
     <ThemeContext.Provider value={{ darkMode, toggleDarkMode }}>

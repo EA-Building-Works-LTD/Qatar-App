@@ -24,6 +24,7 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import PlaceIcon from '@mui/icons-material/Place';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { useFirebase } from '../contexts/FirebaseContext';
 
 interface HomePageProps {
   itineraryData: ItineraryData;
@@ -49,12 +50,14 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
   
   // Calculate the number of days and nights from the itinerary data
   const calculateDaysAndNights = () => {
-    if (!itineraryData || !itineraryData.days || itineraryData.days.length === 0) {
+    if (!itineraryData || !itineraryData.days || !Array.isArray(itineraryData.days) || itineraryData.days.length === 0) {
       return { days: 0, nights: 0 };
     }
     
     // Count days that have at least one activity (same as ItineraryPage)
-    const daysWithActivities = itineraryData.days.filter(day => day.activities.length > 0).length;
+    const daysWithActivities = itineraryData.days.filter(day => 
+      day && day.activities && Array.isArray(day.activities) && day.activities.length > 0
+    ).length;
     
     // Number of nights is typically one less than the number of days
     const nights = daysWithActivities > 0 ? daysWithActivities - 1 : 0;
@@ -70,22 +73,9 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
     seconds: 0
   });
   
-  // Add state for notes feature with localStorage persistence
-  const [notes, setNotes] = useState<Array<{ id: number; text: string; completed: boolean }>>(() => {
-    // Try to get saved notes from localStorage
-    const savedNotes = localStorage.getItem('dohaItineraryNotes');
-    return savedNotes ? JSON.parse(savedNotes) : [
-      { id: 1, text: 'Visit Museum of Islamic Art', completed: false },
-      { id: 2, text: 'Try local street food at Souq Waqif', completed: false },
-      { id: 3, text: 'Shop at Villaggio Mall', completed: false }
-    ];
-  });
+  // Use Firebase context for notes
+  const { notes, addNote, toggleNote, deleteNote } = useFirebase();
   const [newNote, setNewNote] = useState<string>('');
-  
-  // Save notes to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem('dohaItineraryNotes', JSON.stringify(notes));
-  }, [notes]);
   
   // Calculate countdown to trip
   useEffect(() => {
@@ -134,27 +124,33 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
   }, []);
   
   // Handle adding a new note
-  const handleAddNote = () => {
+  const handleAddNote = async () => {
     if (newNote.trim() === '') return;
     
-    const newId = notes.length > 0 ? Math.max(...notes.map(note => note.id)) + 1 : 1;
-    const updatedNotes = [...notes, { id: newId, text: newNote, completed: false }];
-    setNotes(updatedNotes);
-    setNewNote('');
+    try {
+      await addNote(newNote);
+      setNewNote('');
+    } catch (error) {
+      console.error("Error adding note:", error);
+    }
   };
 
   // Handle toggling a note's completed status
-  const handleToggleNote = (id: number) => {
-    const updatedNotes = notes.map(note => 
-      note.id === id ? { ...note, completed: !note.completed } : note
-    );
-    setNotes(updatedNotes);
+  const handleToggleNote = async (id: number) => {
+    try {
+      await toggleNote(id);
+    } catch (error) {
+      console.error("Error toggling note:", error);
+    }
   };
 
   // Handle deleting a note
-  const handleDeleteNote = (id: number) => {
-    const updatedNotes = notes.filter(note => note.id !== id);
-    setNotes(updatedNotes);
+  const handleDeleteNote = async (id: number) => {
+    try {
+      await deleteNote(id);
+    } catch (error) {
+      console.error("Error deleting note:", error);
+    }
   };
 
   // Handle note input change
@@ -166,26 +162,37 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
   const countSpots = () => {
     let spotCount = 0;
     
+    // Check if itineraryData and days array exist
+    if (!itineraryData || !itineraryData.days || !Array.isArray(itineraryData.days)) {
+      return 0;
+    }
+    
     itineraryData.days.forEach(day => {
-      day.activities.forEach(activity => {
-        const lowerDesc = activity.description.toLowerCase();
-        
-        // Skip meals, hotel, and flight activities
-        if (!lowerDesc.includes('breakfast') && 
-            !lowerDesc.includes('lunch') && 
-            !lowerDesc.includes('dinner') && 
-            !lowerDesc.includes('hotel') && 
-            !lowerDesc.includes('check-in') && 
-            !lowerDesc.includes('check out') && 
-            !lowerDesc.includes('flight') && 
-            !lowerDesc.includes('transfer') &&
-            !lowerDesc.includes('return to hotel') &&
-            !lowerDesc.includes('prayer') &&
-            !lowerDesc.includes('mosque') &&
-            !lowerDesc.includes('wake up')) {
-          spotCount++;
-        }
-      });
+      // Check if day and activities exist
+      if (day && day.activities && Array.isArray(day.activities)) {
+        day.activities.forEach(activity => {
+          // Check if activity and description exist
+          if (activity && activity.description) {
+            const lowerDesc = activity.description.toLowerCase();
+            
+            // Skip meals, hotel, and flight activities
+            if (!lowerDesc.includes('breakfast') && 
+                !lowerDesc.includes('lunch') && 
+                !lowerDesc.includes('dinner') && 
+                !lowerDesc.includes('hotel') && 
+                !lowerDesc.includes('check-in') && 
+                !lowerDesc.includes('check out') && 
+                !lowerDesc.includes('flight') && 
+                !lowerDesc.includes('transfer') &&
+                !lowerDesc.includes('return to hotel') &&
+                !lowerDesc.includes('prayer') &&
+                !lowerDesc.includes('mosque') &&
+                !lowerDesc.includes('wake up')) {
+              spotCount++;
+            }
+          }
+        });
+      }
     });
     
     return spotCount;
@@ -204,19 +211,32 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
     const results: SearchResult[] = [];
     const searchTerm = query.toLowerCase();
     
+    // Check if itineraryData and days array exist
+    if (!itineraryData || !itineraryData.days || !Array.isArray(itineraryData.days)) {
+      setSearchResults([]);
+      setShowSearchResults(false);
+      return;
+    }
+    
     // Search through itinerary activities
     itineraryData.days.forEach((day, dayIndex) => {
-      day.activities.forEach(activity => {
-        if (activity.description.toLowerCase().includes(searchTerm)) {
-          results.push({
-            type: 'activity',
-            title: activity.description,
-            date: `Day ${dayIndex + 1} - ${activity.time}`,
-            icon: <CalendarTodayIcon sx={{ color: 'primary.main' }} />,
-            dayIndex: dayIndex
-          });
-        }
-      });
+      // Check if day and activities exist
+      if (day && day.activities && Array.isArray(day.activities)) {
+        day.activities.forEach(activity => {
+          // Check if activity and description exist
+          if (activity && activity.description) {
+            if (activity.description.toLowerCase().includes(searchTerm)) {
+              results.push({
+                type: 'activity',
+                title: activity.description,
+                date: `Day ${dayIndex + 1} - ${activity.time || ''}`,
+                icon: <CalendarTodayIcon sx={{ color: 'primary.main' }} />,
+                dayIndex: dayIndex
+              });
+            }
+          }
+        });
+      }
     });
     
     // Search through places to visit (notes)

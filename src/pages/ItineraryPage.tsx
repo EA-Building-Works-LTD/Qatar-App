@@ -80,7 +80,14 @@ const ItineraryPage: React.FC<ItineraryPageProps> = ({
   
   // State for managing activities
   const [localItineraryData, setLocalItineraryData] = useState<ItineraryData>(itineraryData);
-  const selectedDay = localItineraryData.days[currentDayIndex];
+  // Safely access the selected day, handling the case where it might be undefined
+  const selectedDay = localItineraryData && 
+                     localItineraryData.days && 
+                     Array.isArray(localItineraryData.days) && 
+                     currentDayIndex >= 0 && 
+                     currentDayIndex < localItineraryData.days.length ? 
+                     localItineraryData.days[currentDayIndex] : 
+                     undefined;
   
   // Update local state when prop changes
   useEffect(() => {
@@ -295,6 +302,11 @@ const ItineraryPage: React.FC<ItineraryPageProps> = ({
 
   // Sort activities chronologically
   const sortActivitiesChronologically = () => {
+    // Check if selectedDay and activities exist
+    if (!selectedDay || !selectedDay.activities || !Array.isArray(selectedDay.activities)) {
+      return [];
+    }
+    
     const sortedActivities = [...selectedDay.activities];
     
     return sortedActivities.sort((a, b) => {
@@ -366,6 +378,21 @@ const ItineraryPage: React.FC<ItineraryPageProps> = ({
   // Handle opening the edit dialog
   const handleEditClick = () => {
     if (menuActivityIndex !== -1) {
+      // Safely access the activity
+      if (!localItineraryData || 
+          !localItineraryData.days || 
+          !Array.isArray(localItineraryData.days) ||
+          currentDayIndex < 0 ||
+          currentDayIndex >= localItineraryData.days.length ||
+          !localItineraryData.days[currentDayIndex] ||
+          !localItineraryData.days[currentDayIndex].activities ||
+          !Array.isArray(localItineraryData.days[currentDayIndex].activities) ||
+          menuActivityIndex >= localItineraryData.days[currentDayIndex].activities.length) {
+        console.error("Cannot access activity: Invalid data structure or indices");
+        handleMenuClose();
+        return;
+      }
+      
       const activity = localItineraryData.days[currentDayIndex].activities[menuActivityIndex];
       setCurrentActivityIndex(menuActivityIndex);
       
@@ -411,6 +438,23 @@ const ItineraryPage: React.FC<ItineraryPageProps> = ({
   // Handle saving edited activity
   const handleSaveEdit = () => {
     if (currentActivityIndex !== -1 && formActivity.date && formActivity.time) {
+      // Safely check if we can access the activity
+      if (!localItineraryData || 
+          !localItineraryData.days || 
+          !Array.isArray(localItineraryData.days) ||
+          currentDayIndex < 0 ||
+          currentDayIndex >= localItineraryData.days.length ||
+          !localItineraryData.days[currentDayIndex] ||
+          !localItineraryData.days[currentDayIndex].activities ||
+          !Array.isArray(localItineraryData.days[currentDayIndex].activities) ||
+          currentActivityIndex >= localItineraryData.days[currentDayIndex].activities.length) {
+        console.error("Cannot save edit: Invalid data structure or indices");
+        setEditDialogOpen(false);
+        setCurrentActivity(null);
+        setCurrentActivityIndex(-1);
+        return;
+      }
+      
       // Create a deep copy of the current itinerary data
       const updatedItineraryData = JSON.parse(JSON.stringify(localItineraryData)) as ItineraryData;
       
@@ -590,6 +634,22 @@ const ItineraryPage: React.FC<ItineraryPageProps> = ({
   // Handle deleting activity
   const handleDeleteActivity = () => {
     if (currentActivityIndex !== -1) {
+      // Safely check if we can access the activity
+      if (!localItineraryData || 
+          !localItineraryData.days || 
+          !Array.isArray(localItineraryData.days) ||
+          currentDayIndex < 0 ||
+          currentDayIndex >= localItineraryData.days.length ||
+          !localItineraryData.days[currentDayIndex] ||
+          !localItineraryData.days[currentDayIndex].activities ||
+          !Array.isArray(localItineraryData.days[currentDayIndex].activities) ||
+          currentActivityIndex >= localItineraryData.days[currentDayIndex].activities.length) {
+        console.error("Cannot delete activity: Invalid data structure or indices");
+        setDeleteDialogOpen(false);
+        setCurrentActivityIndex(-1);
+        return;
+      }
+      
       // Create a deep copy of the current itinerary data
       const updatedItineraryData = JSON.parse(JSON.stringify(localItineraryData)) as ItineraryData;
       
@@ -632,34 +692,52 @@ const ItineraryPage: React.FC<ItineraryPageProps> = ({
 
   // Count the number of days in the itinerary that have events
   const countDays = () => {
+    // Check if days array exists
+    if (!localItineraryData || !localItineraryData.days || !Array.isArray(localItineraryData.days)) {
+      return 0;
+    }
+    
     // Only count days that have at least one activity
-    return localItineraryData.days.filter(day => day.activities.length > 0).length;
+    return localItineraryData.days.filter(day => 
+      day && day.activities && Array.isArray(day.activities) && day.activities.length > 0
+    ).length;
   };
 
   // Count the number of spots (activities that are not meals or hotel-related)
   const countSpots = () => {
     let spotCount = 0;
     
+    // Check if days array exists
+    if (!localItineraryData || !localItineraryData.days || !Array.isArray(localItineraryData.days)) {
+      return 0;
+    }
+    
     localItineraryData.days.forEach(day => {
-      day.activities.forEach(activity => {
-        const lowerDesc = activity.description.toLowerCase();
-        
-        // Skip meals, hotel, and flight activities
-        if (!lowerDesc.includes('breakfast') && 
-            !lowerDesc.includes('lunch') && 
-            !lowerDesc.includes('dinner') && 
-            !lowerDesc.includes('hotel') && 
-            !lowerDesc.includes('check-in') && 
-            !lowerDesc.includes('check out') && 
-            !lowerDesc.includes('flight') && 
-            !lowerDesc.includes('transfer') &&
-            !lowerDesc.includes('return to hotel') &&
-            !lowerDesc.includes('prayer') &&
-            !lowerDesc.includes('mosque') &&
-            !lowerDesc.includes('wake up')) {
-          spotCount++;
-        }
-      });
+      // Check if day and activities exist
+      if (day && day.activities && Array.isArray(day.activities)) {
+        day.activities.forEach(activity => {
+          // Check if activity and description exist
+          if (activity && activity.description) {
+            const lowerDesc = activity.description.toLowerCase();
+            
+            // Skip meals, hotel, and flight activities
+            if (!lowerDesc.includes('breakfast') && 
+                !lowerDesc.includes('lunch') && 
+                !lowerDesc.includes('dinner') && 
+                !lowerDesc.includes('hotel') && 
+                !lowerDesc.includes('check-in') && 
+                !lowerDesc.includes('check out') && 
+                !lowerDesc.includes('flight') && 
+                !lowerDesc.includes('transfer') &&
+                !lowerDesc.includes('return to hotel') &&
+                !lowerDesc.includes('prayer') &&
+                !lowerDesc.includes('mosque') &&
+                !lowerDesc.includes('wake up')) {
+              spotCount++;
+            }
+          }
+        });
+      }
     });
     
     return spotCount;
@@ -669,29 +747,40 @@ const ItineraryPage: React.FC<ItineraryPageProps> = ({
   const countMeals = () => {
     let mealCount = 0;
     
+    // Check if days array exists
+    if (!localItineraryData || !localItineraryData.days || !Array.isArray(localItineraryData.days)) {
+      return 0;
+    }
+    
     localItineraryData.days.forEach(day => {
-      day.activities.forEach(activity => {
-        const lowerDesc = activity.description.toLowerCase();
-        
-        if (lowerDesc.includes('breakfast') || 
-            lowerDesc.includes('lunch') || 
-            lowerDesc.includes('dinner') || 
-            lowerDesc.includes('café') || 
-            lowerDesc.includes('cafe') || 
-            lowerDesc.includes('restaurant') || 
-            lowerDesc.includes('food') || 
-            lowerDesc.includes('meal') ||
-            // Include specific food places from the itinerary
-            lowerDesc.includes('cheesecake factory') ||
-            lowerDesc.includes('flo cafe') ||
-            lowerDesc.includes('milkbun') ||
-            lowerDesc.includes('arabesq') ||
-            lowerDesc.includes('creme & butter') ||
-            lowerDesc.includes('dave\'s hot chicken') ||
-            lowerDesc.includes('raising cane\'s')) {
-          mealCount++;
-        }
-      });
+      // Check if day and activities exist
+      if (day && day.activities && Array.isArray(day.activities)) {
+        day.activities.forEach(activity => {
+          // Check if activity and description exist
+          if (activity && activity.description) {
+            const lowerDesc = activity.description.toLowerCase();
+            
+            if (lowerDesc.includes('breakfast') || 
+                lowerDesc.includes('lunch') || 
+                lowerDesc.includes('dinner') || 
+                lowerDesc.includes('café') || 
+                lowerDesc.includes('cafe') || 
+                lowerDesc.includes('restaurant') || 
+                lowerDesc.includes('food') || 
+                lowerDesc.includes('meal') ||
+                // Include specific food places from the itinerary
+                lowerDesc.includes('cheesecake factory') ||
+                lowerDesc.includes('flo cafe') ||
+                lowerDesc.includes('milkbun') ||
+                lowerDesc.includes('arabesq') ||
+                lowerDesc.includes('creme & butter') ||
+                lowerDesc.includes('dave\'s hot chicken') ||
+                lowerDesc.includes('raising cane\'s')) {
+              mealCount++;
+            }
+          }
+        });
+      }
     });
     
     return mealCount;

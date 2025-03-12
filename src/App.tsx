@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { CssBaseline, Box, Paper, BottomNavigation, BottomNavigationAction } from '@mui/material';
-import { dohaItinerary, ItineraryData } from './data/itineraryData';
+import { CssBaseline, Box, Paper, BottomNavigation, BottomNavigationAction, CircularProgress } from '@mui/material';
+import { dohaItinerary } from './data/itineraryData';
 import HomeIcon from '@mui/icons-material/Home';
-
 import InfoIcon from '@mui/icons-material/Info';
 import PersonIcon from '@mui/icons-material/Person';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { FirebaseProvider, useFirebase } from './contexts/FirebaseContext';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 
 // Import page components
@@ -21,46 +21,24 @@ import ProfilePage from './pages/ProfilePage';
 // @ts-ignore
 import ExpensesPage from './pages/ExpensesPage';
 
+// Main App wrapper with providers
 function App() {
-  const [currentPage, setCurrentPage] = useState<number>(() => {
-    try {
-      // Try to get saved current page from localStorage
-      const savedPage = localStorage.getItem('dohaCurrentPage');
-      return savedPage ? parseInt(savedPage, 10) : 0;
-    } catch (error) {
-      return 0;
-    } 
-  });
+  return (
+    <FirebaseProvider>
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
+    </FirebaseProvider>
+  );
+}
+
+// App content that uses the Firebase context
+function AppContent() {
+  const { itineraryData, updateItineraryData, loading, error } = useFirebase();
   
-  const [itineraryData, setItineraryData] = useState<ItineraryData>(() => {
-    try {
-      // Try to get saved itinerary data from localStorage
-      const savedItinerary = localStorage.getItem('dohaItineraryData');
-      console.log("App: Retrieved from localStorage:", savedItinerary);
-      
-      if (savedItinerary) {
-        const parsedData = JSON.parse(savedItinerary);
-        console.log("App: Parsed itinerary data:", parsedData);
-        return parsedData;
-      } else {
-        console.log("App: No saved data found, using default itinerary");
-        return dohaItinerary;
-      }
-    } catch (error) {
-      console.error("App: Error loading itinerary data from localStorage:", error);
-      return dohaItinerary;
-    }
-  });
-
-  // Save current page to localStorage whenever it changes
-  useEffect(() => {
-    try {
-      localStorage.setItem('dohaCurrentPage', currentPage.toString());
-    } catch (error) {
-      console.error("App: Error saving current page to localStorage:", error);
-    }
-  }, [currentPage]);
-
+  // Manage current page state locally instead of in Firebase
+  const [currentPage, setCurrentPage] = useState<number>(0);
+  
   // State to track the first day with events
   const [firstDayWithEvents, setFirstDayWithEvents] = useState<number | null>(null);
 
@@ -95,22 +73,27 @@ function App() {
     }
   }, [currentPage, firstDayWithEvents]);
 
-  // Function to update itinerary data
-  const updateItineraryData = (newData: ItineraryData) => {
-    console.log("App: Updating itinerary data:", newData);
-    setItineraryData(newData);
-    
-    try {
-      localStorage.setItem('dohaItineraryData', JSON.stringify(newData));
-      console.log("App: Saved itinerary data to localStorage");
-    } catch (error) {
-      console.error("App: Error saving itinerary data to localStorage:", error);
-    }
-  };
-
   const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
 
   const renderPage = () => {
+    // Show loading indicator while data is being fetched
+    if (loading) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+
+    // Show error message if there was an error
+    if (error) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: 'error.main' }}>
+          Error: {error}. Please refresh the page.
+        </Box>
+      );
+    }
+
     switch (currentPage) {
       case 0:
         return <HomePage 
@@ -148,7 +131,7 @@ function App() {
   };
 
   return (
-    <ThemeProvider>
+    <>
       <CssBaseline />
       <Box sx={{ 
         display: 'flex', 
@@ -201,7 +184,7 @@ function App() {
           </BottomNavigation>
         </Paper>
       </Box>
-    </ThemeProvider>
+    </>
   );
 }
 

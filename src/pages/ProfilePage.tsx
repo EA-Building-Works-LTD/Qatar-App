@@ -38,6 +38,7 @@ import LanguageIcon from '@mui/icons-material/Language';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import SecurityIcon from '@mui/icons-material/Security';
 import { useTheme } from '../contexts/ThemeContext';
+import { useFirebase } from '../contexts/FirebaseContext';
 
 // Define user profile interface
 interface UserProfile {
@@ -62,37 +63,15 @@ interface Preferences {
 
 const ProfilePage: React.FC = () => {
   const { darkMode, toggleDarkMode } = useTheme();
+  const { 
+    userProfile, 
+    updateUserProfile, 
+    notificationSettings, 
+    updateNotificationSettings, 
+    preferences, 
+    updatePreferences 
+  } = useFirebase();
   
-  // State for user profile
-  const [profile, setProfile] = useState<UserProfile>(() => {
-    const savedProfile = localStorage.getItem('dohaUserProfile');
-    return savedProfile ? JSON.parse(savedProfile) : {
-      name: 'Guest User',
-      email: 'guest@example.com',
-      avatar: 'G'
-    };
-  });
-
-  // State for notification settings
-  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
-    const savedSettings = localStorage.getItem('dohaNotificationSettings');
-    return savedSettings ? JSON.parse(savedSettings) : {
-      email: true,
-      push: true,
-      updates: false
-    };
-  });
-
-  // State for preferences
-  const [preferences, setPreferences] = useState<Preferences>(() => {
-    const savedPreferences = localStorage.getItem('dohaPreferences');
-    return savedPreferences ? JSON.parse(savedPreferences) : {
-      darkMode: false,
-      language: 'English',
-      sound: true
-    };
-  });
-
   // State for dialogs
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [accountDialogOpen, setAccountDialogOpen] = useState(false);
@@ -102,46 +81,24 @@ const ProfilePage: React.FC = () => {
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
 
   // State for form inputs
-  const [formName, setFormName] = useState(profile.name);
-  const [formEmail, setFormEmail] = useState(profile.email);
+  const [formName, setFormName] = useState(userProfile.name);
+  const [formEmail, setFormEmail] = useState(userProfile.email);
+
+  // Update form inputs when userProfile changes
+  useEffect(() => {
+    setFormName(userProfile.name);
+    setFormEmail(userProfile.email);
+  }, [userProfile]);
 
   // State for snackbar
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info'>('success');
 
-  // Save profile to localStorage when it changes
-  useEffect(() => {
-    localStorage.setItem('dohaUserProfile', JSON.stringify(profile));
-  }, [profile]);
-
-  // Save notification settings to localStorage when they change
-  useEffect(() => {
-    localStorage.setItem('dohaNotificationSettings', JSON.stringify(notificationSettings));
-  }, [notificationSettings]);
-
-  // Save preferences to localStorage when they change
-  useEffect(() => {
-    const newPreferences = {
-      ...preferences,
-      darkMode // Sync with theme context
-    };
-    localStorage.setItem('dohaPreferences', JSON.stringify(newPreferences));
-  }, [preferences, darkMode]);
-
-  // Initialize preferences from localStorage
-  useEffect(() => {
-    const savedPreferences = localStorage.getItem('dohaPreferences');
-    if (savedPreferences) {
-      const parsedPreferences = JSON.parse(savedPreferences);
-      setPreferences(parsedPreferences);
-    }
-  }, []);
-
   // Handle edit profile dialog
   const handleEditProfileOpen = () => {
-    setFormName(profile.name);
-    setFormEmail(profile.email);
+    setFormName(userProfile.name);
+    setFormEmail(userProfile.email);
     setEditProfileOpen(true);
   };
 
@@ -161,13 +118,13 @@ const ProfilePage: React.FC = () => {
 
     // Update profile
     const newProfile = {
-      ...profile,
+      ...userProfile,
       name: formName,
       email: formEmail,
       avatar: formName.charAt(0).toUpperCase()
     };
     
-    setProfile(newProfile);
+    updateUserProfile(newProfile);
     setEditProfileOpen(false);
     
     setSnackbarMessage('Profile updated successfully');
@@ -177,21 +134,42 @@ const ProfilePage: React.FC = () => {
 
   // Handle notification settings
   const handleNotificationChange = (setting: keyof NotificationSettings) => {
-    setNotificationSettings(prev => ({
-      ...prev,
-      [setting]: !prev[setting]
-    }));
+    const updatedSettings = {
+      ...notificationSettings,
+      [setting]: !notificationSettings[setting]
+    };
+    updateNotificationSettings(updatedSettings);
+    
+    setSnackbarMessage(`${setting.charAt(0).toUpperCase() + setting.slice(1)} notifications ${updatedSettings[setting] ? 'enabled' : 'disabled'}`);
+    setSnackbarSeverity('success');
+    setSnackbarOpen(true);
   };
 
   // Handle preferences
-  const handlePreferenceChange = (preference: keyof Preferences, value: any) => {
+  const handlePreferenceChange = (
+    preference: keyof Preferences, 
+    value: boolean | React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | string
+  ) => {
     if (preference === 'darkMode') {
       toggleDarkMode();
     }
-    setPreferences(prev => ({
-      ...prev,
-      [preference]: typeof value === 'boolean' ? value : value.target.value
-    }));
+    
+    const updatedPreferences = {
+      ...preferences,
+      [preference]: typeof value === 'boolean' 
+        ? value 
+        : typeof value === 'string'
+          ? value
+          : preference === 'language' 
+            ? (value as React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>).target.value
+            : (value as React.ChangeEvent<HTMLInputElement>).target.checked
+    };
+    
+    updatePreferences(updatedPreferences);
+    
+    setSnackbarMessage(`${preference.charAt(0).toUpperCase() + preference.slice(1)} preference updated`);
+    setSnackbarSeverity('success');
+    setSnackbarOpen(true);
   };
 
   // Handle logout
@@ -204,7 +182,7 @@ const ProfilePage: React.FC = () => {
     setSnackbarOpen(true);
     
     // Reset profile to default
-    setProfile({
+    updateUserProfile({
       name: 'Guest User',
       email: 'guest@example.com',
       avatar: 'G'
@@ -237,15 +215,15 @@ const ProfilePage: React.FC = () => {
                 mr: 3
               }}
             >
-              {profile.avatar}
+              {userProfile.avatar}
             </Avatar>
             
             <Box sx={{ flex: 1 }}>
               <Typography variant="h5" sx={{ fontWeight: 600, mb: 0.5 }}>
-                {profile.name}
+                {userProfile.name}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                {profile.email}
+                {userProfile.email}
               </Typography>
               <Button 
                 variant="outlined" 
@@ -602,7 +580,7 @@ const ProfilePage: React.FC = () => {
               <TextField
                 select
                 value={preferences.language}
-                onChange={(e) => handlePreferenceChange('language', e)}
+                onChange={(e) => handlePreferenceChange('language', e.target.value)}
                 variant="outlined"
                 size="small"
                 sx={{ width: 120 }}
