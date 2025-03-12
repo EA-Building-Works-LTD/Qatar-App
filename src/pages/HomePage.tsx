@@ -684,7 +684,7 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
                   height: '100%'
                 }}>
                   <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-                    No places added yet. Add some places you want to visit!
+                    No places added, please add one above
                   </Typography>
                 </Box>
               ) : (

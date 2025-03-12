@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { CssBaseline, Box, Paper, BottomNavigation, BottomNavigationAction, CircularProgress } from '@mui/material';
+import React, { useState, useEffect, ErrorInfo, Component } from 'react';
+import { CssBaseline, Box, Paper, BottomNavigation, BottomNavigationAction, CircularProgress, Typography } from '@mui/material';
 import { dohaItinerary } from './data/itineraryData';
 import HomeIcon from '@mui/icons-material/Home';
 import InfoIcon from '@mui/icons-material/Info';
@@ -8,59 +8,179 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { FirebaseProvider, useFirebase } from './contexts/FirebaseContext';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 
 // Import page components
-// @ts-ignore
 import HomePage from './pages/HomePage';
-// @ts-ignore
 import ItineraryPage from './pages/ItineraryPage';
-// @ts-ignore
 import InfoPage from './pages/InfoPage';
-// @ts-ignore
 import ProfilePage from './pages/ProfilePage';
-// @ts-ignore
 import ExpensesPage from './pages/ExpensesPage';
+import LoginPage from './pages/LoginPage';
+
+// Error Boundary Component
+class ErrorBoundary extends Component<{children: React.ReactNode}, {hasError: boolean, error: Error | null, errorInfo: ErrorInfo | null}> {
+  constructor(props: {children: React.ReactNode}) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    this.setState({ errorInfo });
+    console.error("Error caught by boundary:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Box sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="h5" color="error" gutterBottom>
+            Something went wrong
+          </Typography>
+          <Typography variant="body1" paragraph>
+            {this.state.error?.toString()}
+          </Typography>
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', textAlign: 'left', bgcolor: 'rgba(0,0,0,0.05)', p: 2, borderRadius: 1 }}>
+            {this.state.errorInfo?.componentStack}
+          </Typography>
+          <Box sx={{ mt: 2 }}>
+            <button onClick={() => window.location.reload()}>
+              Reload Page
+            </button>
+          </Box>
+        </Box>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// Protected Route component
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, loading } = useFirebase();
+  
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+  
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  
+  return <>{children}</>;
+};
 
 // Main App wrapper with providers
 function App() {
   return (
-    <FirebaseProvider>
-      <ThemeProvider>
-        <AppContent />
-      </ThemeProvider>
-    </FirebaseProvider>
+    <ErrorBoundary>
+      <FirebaseProvider>
+        <ThemeProvider>
+          <Router>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/*" element={<ProtectedRoutes />} />
+            </Routes>
+          </Router>
+        </ThemeProvider>
+      </FirebaseProvider>
+    </ErrorBoundary>
+  );
+}
+
+// Protected routes component
+function ProtectedRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<Navigate to="/home" replace />} />
+      <Route path="/home" element={
+        <ProtectedRoute>
+          <AppContent initialPage={0} />
+        </ProtectedRoute>
+      } />
+      <Route path="/itinerary" element={
+        <ProtectedRoute>
+          <AppContent initialPage={1} />
+        </ProtectedRoute>
+      } />
+      <Route path="/expenses" element={
+        <ProtectedRoute>
+          <AppContent initialPage={2} />
+        </ProtectedRoute>
+      } />
+      <Route path="/info" element={
+        <ProtectedRoute>
+          <AppContent initialPage={3} />
+        </ProtectedRoute>
+      } />
+      <Route path="/profile" element={
+        <ProtectedRoute>
+          <AppContent initialPage={4} />
+        </ProtectedRoute>
+      } />
+      <Route path="*" element={<Navigate to="/home" replace />} />
+    </Routes>
   );
 }
 
 // App content that uses the Firebase context
-function AppContent() {
+function AppContent({ initialPage = 0 }: { initialPage?: number }) {
   const { itineraryData, updateItineraryData, loading, error } = useFirebase();
+  const navigate = useNavigate();
   
-  // Manage current page state locally instead of in Firebase
-  const [currentPage, setCurrentPage] = useState<number>(0);
+  // Use local state for current page instead of Firebase context
+  const [currentPage, setCurrentPage] = useState(initialPage);
   
   // State to track the first day with events
   const [firstDayWithEvents, setFirstDayWithEvents] = useState<number | null>(null);
 
+  // Set initial page based on route
+  useEffect(() => {
+    setCurrentPage(initialPage);
+  }, [initialPage]);
+
+  // Update route when page changes
+  useEffect(() => {
+    const routes = ['/home', '/itinerary', '/expenses', '/info', '/profile'];
+    if (currentPage >= 0 && currentPage < routes.length) {
+      navigate(routes[currentPage]);
+    }
+  }, [currentPage, navigate]);
+
   // Find the first day with events when itinerary data changes
   useEffect(() => {
     if (itineraryData && itineraryData.days) {
-      // Sort days chronologically
-      const sortedDays = [...itineraryData.days].sort((a, b) => {
-        const dateA = new Date(a.date.split(' ').join(' '));
-        const dateB = new Date(b.date.split(' ').join(' '));
-        return dateA.getTime() - dateB.getTime();
-      });
+      try {
+        // Sort days chronologically
+        const sortedDays = [...itineraryData.days].sort((a, b) => {
+          const dateA = new Date(a.date.split(' ').join(' '));
+          const dateB = new Date(b.date.split(' ').join(' '));
+          return dateA.getTime() - dateB.getTime();
+        });
 
-      // Find the first day with activities
-      const firstDayIndex = sortedDays.findIndex(day => day.activities && day.activities.length > 0);
-      
-      if (firstDayIndex !== -1) {
-        // Find this day's index in the original itineraryData.days array
-        const originalIndex = itineraryData.days.findIndex(day => day.date === sortedDays[firstDayIndex].date);
-        setFirstDayWithEvents(originalIndex);
-      } else {
-        setFirstDayWithEvents(null);
+        // Find the first day with activities
+        const firstDayIndex = sortedDays.findIndex(day => 
+          day && day.activities && Array.isArray(day.activities) && day.activities.length > 0
+        );
+        
+        if (firstDayIndex !== -1) {
+          // Find this day's index in the original itineraryData.days array
+          const originalIndex = itineraryData.days.findIndex(day => day.date === sortedDays[firstDayIndex].date);
+          setFirstDayWithEvents(originalIndex);
+        } else {
+          setFirstDayWithEvents(null);
+        }
+      } catch (err) {
+        console.error("Error processing itinerary data:", err);
       }
     }
   }, [itineraryData]);

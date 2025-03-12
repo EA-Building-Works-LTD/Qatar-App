@@ -39,6 +39,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import SecurityIcon from '@mui/icons-material/Security';
 import { useTheme } from '../contexts/ThemeContext';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { useNavigate } from 'react-router-dom';
 
 // Define user profile interface
 interface UserProfile {
@@ -69,8 +70,12 @@ const ProfilePage: React.FC = () => {
     notificationSettings, 
     updateNotificationSettings, 
     preferences, 
-    updatePreferences 
+    updatePreferences,
+    signOutUser,
+    currentUser
   } = useFirebase();
+  
+  const navigate = useNavigate();
   
   // State for dialogs
   const [editProfileOpen, setEditProfileOpen] = useState(false);
@@ -106,7 +111,7 @@ const ProfilePage: React.FC = () => {
     setEditProfileOpen(false);
   };
 
-  const handleEditProfileSave = () => {
+  const handleEditProfileSave = async () => {
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formEmail)) {
@@ -116,77 +121,96 @@ const ProfilePage: React.FC = () => {
       return;
     }
 
-    // Update profile
-    const newProfile = {
-      ...userProfile,
-      name: formName,
-      email: formEmail,
-      avatar: formName.charAt(0).toUpperCase()
-    };
-    
-    updateUserProfile(newProfile);
-    setEditProfileOpen(false);
-    
-    setSnackbarMessage('Profile updated successfully');
-    setSnackbarSeverity('success');
-    setSnackbarOpen(true);
+    try {
+      // Update profile
+      const newProfile = {
+        ...userProfile,
+        name: formName,
+        email: formEmail,
+        avatar: formName.charAt(0).toUpperCase()
+      };
+      
+      await updateUserProfile(newProfile);
+      setEditProfileOpen(false);
+      
+      setSnackbarMessage('Profile updated successfully');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      setSnackbarMessage('Failed to update profile');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    }
   };
 
   // Handle notification settings
-  const handleNotificationChange = (setting: keyof NotificationSettings) => {
-    const updatedSettings = {
-      ...notificationSettings,
-      [setting]: !notificationSettings[setting]
-    };
-    updateNotificationSettings(updatedSettings);
-    
-    setSnackbarMessage(`${setting.charAt(0).toUpperCase() + setting.slice(1)} notifications ${updatedSettings[setting] ? 'enabled' : 'disabled'}`);
-    setSnackbarSeverity('success');
-    setSnackbarOpen(true);
+  const handleNotificationChange = async (setting: keyof NotificationSettings) => {
+    try {
+      const updatedSettings = {
+        ...notificationSettings,
+        [setting]: !notificationSettings[setting]
+      };
+      
+      await updateNotificationSettings(updatedSettings);
+      
+      setSnackbarMessage(`${setting.charAt(0).toUpperCase() + setting.slice(1)} notifications ${updatedSettings[setting] ? 'enabled' : 'disabled'}`);
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+    } catch (error) {
+      console.error('Error updating notification settings:', error);
+      setSnackbarMessage('Failed to update notification settings');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    }
   };
 
   // Handle preferences
-  const handlePreferenceChange = (
+  const handlePreferenceChange = async (
     preference: keyof Preferences, 
     value: boolean | React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | string
   ) => {
-    if (preference === 'darkMode') {
-      toggleDarkMode();
+    try {
+      if (preference === 'darkMode') {
+        toggleDarkMode();
+      }
+      
+      const updatedPreferences = {
+        ...preferences,
+        [preference]: typeof value === 'boolean' 
+          ? value 
+          : typeof value === 'string'
+            ? value
+            : preference === 'language' 
+              ? (value as React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>).target.value
+              : (value as React.ChangeEvent<HTMLInputElement>).target.checked
+      };
+      
+      await updatePreferences(updatedPreferences);
+      
+      setSnackbarMessage(`${preference.charAt(0).toUpperCase() + preference.slice(1)} preference updated`);
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+    } catch (error) {
+      console.error('Error updating preferences:', error);
+      setSnackbarMessage('Failed to update preferences');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
     }
-    
-    const updatedPreferences = {
-      ...preferences,
-      [preference]: typeof value === 'boolean' 
-        ? value 
-        : typeof value === 'string'
-          ? value
-          : preference === 'language' 
-            ? (value as React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>).target.value
-            : (value as React.ChangeEvent<HTMLInputElement>).target.checked
-    };
-    
-    updatePreferences(updatedPreferences);
-    
-    setSnackbarMessage(`${preference.charAt(0).toUpperCase() + preference.slice(1)} preference updated`);
-    setSnackbarSeverity('success');
-    setSnackbarOpen(true);
   };
 
   // Handle logout
-  const handleLogout = () => {
-    // In a real app, you would handle logout logic here
-    setLogoutDialogOpen(false);
-    
-    setSnackbarMessage('You have been logged out');
-    setSnackbarSeverity('info');
-    setSnackbarOpen(true);
-    
-    // Reset profile to default
-    updateUserProfile({
-      name: 'Guest User',
-      email: 'guest@example.com',
-      avatar: 'G'
-    });
+  const handleLogout = async () => {
+    try {
+      await signOutUser();
+      setLogoutDialogOpen(false);
+      navigate('/login');
+    } catch (error) {
+      console.error('Error signing out:', error);
+      setSnackbarMessage('Failed to sign out');
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    }
   };
 
   return (
@@ -225,6 +249,11 @@ const ProfilePage: React.FC = () => {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 {userProfile.email}
               </Typography>
+              {currentUser && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  Google Account: {currentUser.email}
+                </Typography>
+              )}
               <Button 
                 variant="outlined" 
                 size="small" 

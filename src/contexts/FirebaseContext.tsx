@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { database } from '../firebase';
+import { database, auth } from '../firebase';
 import { ref, onValue, set, get, DataSnapshot, DatabaseReference } from 'firebase/database';
+import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { ItineraryData, dohaItinerary } from '../data/itineraryData';
 
 // Define Note type
@@ -52,6 +53,10 @@ export interface ExpensesData {
   totalSpent: number;
 }
 
+// Define a constant for the shared trip ID
+// In a real app, this would be dynamic based on the trip the user is viewing
+const SHARED_TRIP_ID = 'doha-trip-2025';
+
 interface FirebaseContextType {
   itineraryData: ItineraryData;
   updateItineraryData: (newData: ItineraryData) => Promise<void>;
@@ -69,6 +74,14 @@ interface FirebaseContextType {
   updateExpensesData: (newData: ExpensesData) => Promise<void>;
   loading: boolean;
   error: string | null;
+  // Authentication related properties
+  currentUser: User | null;
+  isAuthenticated: boolean;
+  setIsAuthenticated: React.Dispatch<React.SetStateAction<boolean>>;
+  signOutUser: () => Promise<void>;
+  // Current page state
+  currentPage: number;
+  updateCurrentPage: (page: number) => Promise<void>;
 }
 
 const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -113,278 +126,212 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Authentication state
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  
+  // Current page state
+  const [currentPage, setCurrentPage] = useState<number>(0);
 
-  // Initialize and sync data with Firebase
+  // Listen for auth state changes
   useEffect(() => {
-    // Set up references to all data in Firebase
-    const itineraryRef: DatabaseReference = ref(database, 'itinerary');
-    const notesRef: DatabaseReference = ref(database, 'notes');
-    const userProfileRef: DatabaseReference = ref(database, 'userProfile');
-    const notificationSettingsRef: DatabaseReference = ref(database, 'notificationSettings');
-    const preferencesRef: DatabaseReference = ref(database, 'preferences');
-    const expensesDataRef: DatabaseReference = ref(database, 'expensesData');
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setIsAuthenticated(!!user);
+      setLoading(false);
+      
+      if (user) {
+        // If user is authenticated, set up real-time listeners for their data
+        const userId = user.uid;
+        
+        // Set up listener for user profile
+        const userProfileRef = ref(database, `users/${userId}/userProfile`);
+        const profileUnsubscribe = onValue(userProfileRef, (snapshot) => {
+          if (snapshot.exists()) {
+            setUserProfile(snapshot.val());
+          } else {
+            // Initialize with default profile if none exists
+            const defaultProfile = {
+              name: user.displayName || 'User',
+              email: user.email || 'user@example.com',
+              avatar: user.displayName ? user.displayName.charAt(0).toUpperCase() : 'U'
+            };
+            setUserProfile(defaultProfile);
+            // Save default profile to Firebase
+            set(userProfileRef, defaultProfile).catch(err => {
+              console.error("Error setting default user profile:", err);
+            });
+          }
+        }, (error) => {
+          console.error("Error loading user profile:", error);
+        });
+        
+        // Set up listener for notification settings
+        const notificationSettingsRef = ref(database, `users/${userId}/notificationSettings`);
+        const notificationsUnsubscribe = onValue(notificationSettingsRef, (snapshot) => {
+          if (snapshot.exists()) {
+            setNotificationSettings(snapshot.val());
+          } else {
+            // Initialize with default settings if none exist
+            const defaultSettings = {
+              email: true,
+              push: true,
+              updates: false
+            };
+            setNotificationSettings(defaultSettings);
+            // Save default settings to Firebase
+            set(notificationSettingsRef, defaultSettings).catch(err => {
+              console.error("Error setting default notification settings:", err);
+            });
+          }
+        }, (error) => {
+          console.error("Error loading notification settings:", error);
+        });
+        
+        // Set up listener for preferences
+        const preferencesRef = ref(database, `users/${userId}/preferences`);
+        const preferencesUnsubscribe = onValue(preferencesRef, (snapshot) => {
+          if (snapshot.exists()) {
+            setPreferences(snapshot.val());
+          } else {
+            // Initialize with default preferences if none exist
+            const defaultPreferences = {
+              darkMode: false,
+              language: 'English',
+              sound: true
+            };
+            setPreferences(defaultPreferences);
+            // Save default preferences to Firebase
+            set(preferencesRef, defaultPreferences).catch(err => {
+              console.error("Error setting default preferences:", err);
+            });
+          }
+        }, (error) => {
+          console.error("Error loading preferences:", error);
+        });
+        
+        // Set up listener for shared notes (instead of user-specific notes)
+        const sharedNotesRef = ref(database, `shared/${SHARED_TRIP_ID}/notes`);
+        const notesUnsubscribe = onValue(sharedNotesRef, (snapshot) => {
+          if (snapshot.exists()) {
+            setNotes(snapshot.val());
+          } else {
+            // Initialize with an empty array if no notes exist
+            const emptyNotes: Note[] = [];
+            setNotes(emptyNotes);
+            // Save empty notes to Firebase
+            set(sharedNotesRef, emptyNotes).catch(err => {
+              console.error("Error setting empty notes:", err);
+            });
+          }
+        }, (error) => {
+          console.error("Error loading notes:", error);
+        });
+        
+        // Set up listener for shared expenses data
+        const sharedExpensesDataRef = ref(database, `shared/${SHARED_TRIP_ID}/expensesData`);
+        const expensesUnsubscribe = onValue(sharedExpensesDataRef, (snapshot) => {
+          if (snapshot.exists()) {
+            setExpensesData(snapshot.val());
+          } else {
+            // Initialize with default expenses data if none exist
+            const defaultExpensesData = {
+              people: [
+                { id: 1, name: user.displayName || 'User', expenses: [] },
+                { id: 2, name: 'Travel Companion 1', expenses: [] },
+                { id: 3, name: 'Travel Companion 2', expenses: [] }
+              ],
+              totalSpent: 0
+            };
+            setExpensesData(defaultExpensesData);
+            // Save default expenses data to Firebase
+            set(sharedExpensesDataRef, defaultExpensesData).catch(err => {
+              console.error("Error setting default expenses data:", err);
+            });
+          }
+        }, (error) => {
+          console.error("Error loading expenses data:", error);
+        });
+        
+        // Set up listener for shared itinerary data
+        const sharedItineraryDataRef = ref(database, `shared/${SHARED_TRIP_ID}/itineraryData`);
+        const itineraryUnsubscribe = onValue(sharedItineraryDataRef, (snapshot) => {
+          if (snapshot.exists()) {
+            setItineraryData(snapshot.val());
+          } else {
+            // Initialize with default itinerary data if none exist
+            setItineraryData(dohaItinerary);
+            // Save default itinerary data to Firebase
+            set(sharedItineraryDataRef, dohaItinerary).catch(err => {
+              console.error("Error setting default itinerary data:", err);
+            });
+          }
+        }, (error) => {
+          console.error("Error loading itinerary data:", error);
+        });
+        
+        // Return a cleanup function to unsubscribe from all listeners when component unmounts
+        return () => {
+          profileUnsubscribe();
+          notificationsUnsubscribe();
+          preferencesUnsubscribe();
+          notesUnsubscribe();
+          expensesUnsubscribe();
+          itineraryUnsubscribe();
+          unsubscribe();
+        };
+      }
+    });
     
-    // Check and initialize itinerary data
-    get(itineraryRef).then((snapshot: DataSnapshot) => {
-      if (!snapshot.exists()) {
-        set(itineraryRef, dohaItinerary)
-          .then(() => console.log("Default itinerary data initialized in Firebase"))
-          .catch((err: Error) => {
-            console.error("Error initializing itinerary data:", err);
-            setError("Failed to initialize itinerary data");
-          });
-      }
-    }).catch((err: Error) => {
-      console.error("Error checking for existing itinerary data:", err);
-      setError("Failed to check for existing itinerary data");
-    });
-
-    // Check and initialize notes data
-    get(notesRef).then((snapshot: DataSnapshot) => {
-      if (!snapshot.exists()) {
-        const defaultNotes = [
-          { id: 1, text: 'Visit Museum of Islamic Art', completed: false },
-          { id: 2, text: 'Try local street food at Souq Waqif', completed: false },
-          { id: 3, text: 'Shop at Villaggio Mall', completed: false }
-        ];
-        set(notesRef, defaultNotes)
-          .then(() => console.log("Default notes initialized in Firebase"))
-          .catch((err: Error) => {
-            console.error("Error initializing notes:", err);
-            setError("Failed to initialize notes");
-          });
-      }
-    }).catch((err: Error) => {
-      console.error("Error checking for existing notes:", err);
-      setError("Failed to check for existing notes");
-    });
-
-    // Check and initialize user profile data
-    get(userProfileRef).then((snapshot: DataSnapshot) => {
-      if (!snapshot.exists()) {
-        const defaultProfile = {
-          name: 'Guest User',
-          email: 'guest@example.com',
-          avatar: 'G'
-        };
-        set(userProfileRef, defaultProfile)
-          .then(() => console.log("Default user profile initialized in Firebase"))
-          .catch((err: Error) => {
-            console.error("Error initializing user profile:", err);
-            setError("Failed to initialize user profile");
-          });
-      }
-    }).catch((err: Error) => {
-      console.error("Error checking for existing user profile:", err);
-      setError("Failed to check for existing user profile");
-    });
-
-    // Check and initialize notification settings
-    get(notificationSettingsRef).then((snapshot: DataSnapshot) => {
-      if (!snapshot.exists()) {
-        const defaultSettings = {
-          email: true,
-          push: true,
-          updates: false
-        };
-        set(notificationSettingsRef, defaultSettings)
-          .then(() => console.log("Default notification settings initialized in Firebase"))
-          .catch((err: Error) => {
-            console.error("Error initializing notification settings:", err);
-            setError("Failed to initialize notification settings");
-          });
-      }
-    }).catch((err: Error) => {
-      console.error("Error checking for existing notification settings:", err);
-      setError("Failed to check for existing notification settings");
-    });
-
-    // Check and initialize preferences
-    get(preferencesRef).then((snapshot: DataSnapshot) => {
-      if (!snapshot.exists()) {
-        const defaultPreferences = {
-          darkMode: false,
-          language: 'English',
-          sound: true
-        };
-        set(preferencesRef, defaultPreferences)
-          .then(() => console.log("Default preferences initialized in Firebase"))
-          .catch((err: Error) => {
-            console.error("Error initializing preferences:", err);
-            setError("Failed to initialize preferences");
-          });
-      }
-    }).catch((err: Error) => {
-      console.error("Error checking for existing preferences:", err);
-      setError("Failed to check for existing preferences");
-    });
-
-    // Check and initialize expenses data
-    get(expensesDataRef).then((snapshot: DataSnapshot) => {
-      if (!snapshot.exists()) {
-        const defaultExpensesData = {
-          people: [
-            { id: 1, name: 'Ehsaan', expenses: [] },
-            { id: 2, name: 'Amar', expenses: [] },
-            { id: 3, name: 'Wahees', expenses: [] }
-          ],
-          totalSpent: 0
-        };
-        set(expensesDataRef, defaultExpensesData)
-          .then(() => console.log("Default expenses data initialized in Firebase"))
-          .catch((err: Error) => {
-            console.error("Error initializing expenses data:", err);
-            setError("Failed to initialize expenses data");
-          });
-      }
-    }).catch((err: Error) => {
-      console.error("Error checking for existing expenses data:", err);
-      setError("Failed to check for existing expenses data");
-    });
-
-    // Set up real-time listeners for all data
-    const unsubscribeItinerary = onValue(itineraryRef, (snapshot: DataSnapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        console.log("Received updated itinerary data from Firebase");
-        setItineraryData(data);
-      }
-      setLoading(false);
-    }, (err: Error) => {
-      console.error("Error syncing itinerary with Firebase:", err);
-      setError("Failed to sync itinerary with server");
-      setLoading(false);
-    });
-
-    const unsubscribeNotes = onValue(notesRef, (snapshot: DataSnapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        console.log("Received updated notes from Firebase");
-        setNotes(data);
-      }
-    }, (err: Error) => {
-      console.error("Error syncing notes with Firebase:", err);
-      setError("Failed to sync notes with server");
-    });
-
-    const unsubscribeUserProfile = onValue(userProfileRef, (snapshot: DataSnapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        console.log("Received updated user profile from Firebase");
-        setUserProfile(data);
-      }
-    }, (err: Error) => {
-      console.error("Error syncing user profile with Firebase:", err);
-      setError("Failed to sync user profile with server");
-    });
-
-    const unsubscribeNotificationSettings = onValue(notificationSettingsRef, (snapshot: DataSnapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        console.log("Received updated notification settings from Firebase");
-        setNotificationSettings(data);
-      }
-    }, (err: Error) => {
-      console.error("Error syncing notification settings with Firebase:", err);
-      setError("Failed to sync notification settings with server");
-    });
-
-    const unsubscribePreferences = onValue(preferencesRef, (snapshot: DataSnapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        console.log("Received updated preferences from Firebase");
-        setPreferences(data);
-      }
-    }, (err: Error) => {
-      console.error("Error syncing preferences with Firebase:", err);
-      setError("Failed to sync preferences with server");
-    });
-
-    const unsubscribeExpensesData = onValue(expensesDataRef, (snapshot: DataSnapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        console.log("Received updated expenses data from Firebase");
-        setExpensesData(data);
-      }
-    }, (err: Error) => {
-      console.error("Error syncing expenses data with Firebase:", err);
-      setError("Failed to sync expenses data with server");
-    });
-
-    // Clean up listeners on unmount
-    return () => {
-      unsubscribeItinerary();
-      unsubscribeNotes();
-      unsubscribeUserProfile();
-      unsubscribeNotificationSettings();
-      unsubscribePreferences();
-      unsubscribeExpensesData();
-    };
+    return () => unsubscribe();
   }, []);
 
-  // Function to update itinerary data
-  const updateItineraryData = async (newData: ItineraryData): Promise<void> => {
-    try {
-      const itineraryRef: DatabaseReference = ref(database, 'itinerary');
-      await set(itineraryRef, newData);
-      console.log("Itinerary data successfully updated in Firebase");
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      console.error("Error updating itinerary data:", errorMessage);
-      setError("Failed to update itinerary data");
-      throw err;
+  // Auto-clear errors after 5 seconds
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        setError(null);
+      }, 5000);
+      
+      return () => clearTimeout(timer);
     }
-  };
+  }, [error]);
 
-  // Function to add a new note
-  const addNote = async (text: string): Promise<void> => {
+  // Function to sign out
+  const signOutUser = async (): Promise<void> => {
     try {
-      if (text.trim() === '') return;
+      await signOut(auth);
+      setIsAuthenticated(false);
+      setCurrentUser(null);
       
-      const newId = notes.length > 0 ? Math.max(...notes.map(note => note.id)) + 1 : 1;
-      const updatedNotes = [...notes, { id: newId, text, completed: false }];
+      // Reset to default values
+      setUserProfile({
+        name: 'Guest User',
+        email: 'guest@example.com',
+        avatar: 'G'
+      });
+      setNotificationSettings({
+        email: true,
+        push: true,
+        updates: false
+      });
+      setPreferences({
+        darkMode: false,
+        language: 'English',
+        sound: true
+      });
+      setNotes([]);
+      setExpensesData({
+        people: [],
+        totalSpent: 0
+      });
+      setCurrentPage(0);
       
-      const notesRef: DatabaseReference = ref(database, 'notes');
-      await set(notesRef, updatedNotes);
-      console.log("Note successfully added to Firebase");
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      console.error("Error adding note:", errorMessage);
-      setError("Failed to add note");
-      throw err;
-    }
-  };
-
-  // Function to toggle a note's completed status
-  const toggleNote = async (id: number): Promise<void> => {
-    try {
-      const updatedNotes = notes.map(note => 
-        note.id === id ? { ...note, completed: !note.completed } : note
-      );
-      
-      const notesRef: DatabaseReference = ref(database, 'notes');
-      await set(notesRef, updatedNotes);
-      console.log("Note successfully toggled in Firebase");
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      console.error("Error toggling note:", errorMessage);
-      setError("Failed to update note");
-      throw err;
-    }
-  };
-
-  // Function to delete a note
-  const deleteNote = async (id: number): Promise<void> => {
-    try {
-      const updatedNotes = notes.filter(note => note.id !== id);
-      
-      const notesRef: DatabaseReference = ref(database, 'notes');
-      await set(notesRef, updatedNotes);
-      console.log("Note successfully deleted from Firebase");
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      console.error("Error deleting note:", errorMessage);
-      setError("Failed to delete note");
+      console.error("Error signing out:", errorMessage);
+      setError("Failed to sign out");
       throw err;
     }
   };
@@ -392,56 +339,193 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
   // Function to update user profile
   const updateUserProfile = async (newProfile: UserProfile): Promise<void> => {
     try {
-      const userProfileRef: DatabaseReference = ref(database, 'userProfile');
+      if (!currentUser) {
+        console.log("No authenticated user, skipping Firebase update");
+        return;
+      }
+      
+      const userId = currentUser.uid;
+      const userProfileRef: DatabaseReference = ref(database, `users/${userId}/userProfile`);
       await set(userProfileRef, newProfile);
+      // No need to update local state here as the onValue listener will handle it
       console.log("User profile successfully updated in Firebase");
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error("Error updating user profile:", errorMessage);
-      setError("Failed to update user profile");
-      throw err;
+      // Don't throw the error, just log it
     }
   };
 
   // Function to update notification settings
   const updateNotificationSettings = async (newSettings: NotificationSettings): Promise<void> => {
     try {
-      const notificationSettingsRef: DatabaseReference = ref(database, 'notificationSettings');
+      if (!currentUser) {
+        console.log("No authenticated user, skipping Firebase update");
+        return;
+      }
+      
+      const userId = currentUser.uid;
+      const notificationSettingsRef: DatabaseReference = ref(database, `users/${userId}/notificationSettings`);
       await set(notificationSettingsRef, newSettings);
+      // No need to update local state here as the onValue listener will handle it
       console.log("Notification settings successfully updated in Firebase");
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error("Error updating notification settings:", errorMessage);
-      setError("Failed to update notification settings");
-      throw err;
+      // Don't throw the error, just log it
     }
   };
 
   // Function to update preferences
   const updatePreferences = async (newPreferences: Preferences): Promise<void> => {
     try {
-      const preferencesRef: DatabaseReference = ref(database, 'preferences');
+      if (!currentUser) {
+        console.log("No authenticated user, skipping Firebase update");
+        return;
+      }
+      
+      const userId = currentUser.uid;
+      const preferencesRef: DatabaseReference = ref(database, `users/${userId}/preferences`);
       await set(preferencesRef, newPreferences);
+      // No need to update local state here as the onValue listener will handle it
       console.log("Preferences successfully updated in Firebase");
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error("Error updating preferences:", errorMessage);
-      setError("Failed to update preferences");
-      throw err;
+      // Don't throw the error, just log it
     }
   };
 
-  // Function to update expenses data
+  // Function to update itinerary data (now updates shared data)
+  const updateItineraryData = async (newData: ItineraryData): Promise<void> => {
+    try {
+      if (!currentUser) {
+        console.log("No authenticated user, skipping Firebase update");
+        return;
+      }
+      
+      // Update shared itinerary data
+      const sharedItineraryRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/itineraryData`);
+      await set(sharedItineraryRef, newData);
+      // No need to update local state here as the onValue listener will handle it
+      console.log("Shared itinerary data successfully updated in Firebase");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.error("Error updating itinerary data:", errorMessage);
+      // Don't throw the error, just log it
+    }
+  };
+
+  // Function to add a new note (now updates shared data)
+  const addNote = async (text: string): Promise<void> => {
+    try {
+      if (text.trim() === '') return;
+      
+      if (!currentUser) {
+        console.log("No authenticated user, skipping Firebase update");
+        return;
+      }
+      
+      const newId = notes.length > 0 ? Math.max(...notes.map(note => note.id)) + 1 : 1;
+      const updatedNotes = [...notes, { id: newId, text, completed: false }];
+      
+      // Update shared notes
+      const sharedNotesRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/notes`);
+      await set(sharedNotesRef, updatedNotes);
+      // No need to update local state here as the onValue listener will handle it
+      console.log("Shared note successfully added to Firebase");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.error("Error adding note:", errorMessage);
+      // Don't throw the error, just log it
+    }
+  };
+
+  // Function to toggle a note's completed status (now updates shared data)
+  const toggleNote = async (id: number): Promise<void> => {
+    try {
+      if (!currentUser) {
+        console.log("No authenticated user, skipping Firebase update");
+        return;
+      }
+      
+      const updatedNotes = notes.map(note => 
+        note.id === id ? { ...note, completed: !note.completed } : note
+      );
+      
+      // Update shared notes
+      const sharedNotesRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/notes`);
+      await set(sharedNotesRef, updatedNotes);
+      // No need to update local state here as the onValue listener will handle it
+      console.log("Shared note successfully toggled in Firebase");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.error("Error toggling note:", errorMessage);
+      // Don't throw the error, just log it
+    }
+  };
+
+  // Function to delete a note (now updates shared data)
+  const deleteNote = async (id: number): Promise<void> => {
+    try {
+      if (!currentUser) {
+        console.log("No authenticated user, skipping Firebase update");
+        return;
+      }
+      
+      const updatedNotes = notes.filter(note => note.id !== id);
+      
+      // Update shared notes
+      const sharedNotesRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/notes`);
+      await set(sharedNotesRef, updatedNotes);
+      // No need to update local state here as the onValue listener will handle it
+      console.log("Shared note successfully deleted from Firebase");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.error("Error deleting note:", errorMessage);
+      // Don't throw the error, just log it
+    }
+  };
+
+  // Function to update expenses data (now updates shared data)
   const updateExpensesData = async (newData: ExpensesData): Promise<void> => {
     try {
-      const expensesDataRef: DatabaseReference = ref(database, 'expensesData');
-      await set(expensesDataRef, newData);
-      console.log("Expenses data successfully updated in Firebase");
+      if (!currentUser) {
+        console.log("No authenticated user, skipping Firebase update");
+        return;
+      }
+      
+      // Update shared expenses data
+      const sharedExpensesRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/expensesData`);
+      await set(sharedExpensesRef, newData);
+      // No need to update local state here as the onValue listener will handle it
+      console.log("Shared expenses data successfully updated in Firebase");
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error("Error updating expenses data:", errorMessage);
-      setError("Failed to update expenses data");
-      throw err;
+      // Don't throw the error, just log it
+    }
+  };
+
+  // Function to update current page
+  const updateCurrentPage = async (page: number): Promise<void> => {
+    try {
+      // Update local state immediately for better UX
+      setCurrentPage(page);
+      
+      if (!currentUser) {
+        console.log("No authenticated user, skipping Firebase update");
+        return;
+      }
+      
+      const userId = currentUser.uid;
+      const currentPageRef: DatabaseReference = ref(database, `users/${userId}/currentPage`);
+      await set(currentPageRef, page);
+      console.log("Current page successfully updated in Firebase");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.error("Error updating current page:", errorMessage);
+      // Don't throw the error, just log it
     }
   };
 
@@ -461,7 +545,13 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
     expensesData,
     updateExpensesData,
     loading,
-    error
+    error,
+    currentUser,
+    isAuthenticated,
+    setIsAuthenticated,
+    signOutUser,
+    currentPage,
+    updateCurrentPage
   };
 
   return (
