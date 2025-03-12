@@ -22,14 +22,33 @@ const messaging = firebase.messaging();
 
 // Log when the service worker is installed
 self.addEventListener('install', (event) => {
-  console.log('Service Worker installed');
+  console.log('[firebase-messaging-sw.js] Service Worker installed');
   self.skipWaiting();
 });
 
 // Log when the service worker is activated
 self.addEventListener('activate', (event) => {
-  console.log('Service Worker activated');
+  console.log('[firebase-messaging-sw.js] Service Worker activated');
   return self.clients.claim();
+});
+
+// Handle messages from the client
+self.addEventListener('message', (event) => {
+  console.log('[firebase-messaging-sw.js] Received message from client:', event.data);
+  
+  if (event.data && event.data.type === 'SEND_NOTIFICATION') {
+    const payload = event.data.payload;
+    
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: payload.icon || '/logo192.png',
+      badge: '/logo192.png',
+      tag: 'place-added',
+      data: payload.data || {}
+    });
+    
+    console.log('[firebase-messaging-sw.js] Notification shown from client message');
+  }
 });
 
 // Handle background messages

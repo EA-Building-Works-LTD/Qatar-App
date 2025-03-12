@@ -496,7 +496,7 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       }
       
       const newId = notes.length > 0 ? Math.max(...notes.map(note => note.id)) + 1 : 1;
-      const newNote = { 
+      const updatedNotes = [...notes, { 
         id: newId, 
         text, 
         completed: false,
@@ -504,18 +504,19 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
           name: currentUser.displayName || 'Anonymous',
           email: currentUser.email || ''
         }
-      };
+      }];
       
       // Update shared notes
       const sharedNotesRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/notes`);
-      await set(sharedNotesRef, [...notes, newNote]);
+      await set(sharedNotesRef, updatedNotes);
+      
+      // Send notifications to other users
+      await sendNotificationToUsers(
+        currentUser.email || 'Anonymous',
+        text
+      );
       
       console.log("Shared note successfully added to Firebase");
-      
-      // Instead of calling a Cloud Function, we'll just log that a notification would be sent
-      // In a production app, you would use a server-side solution for this
-      console.log(`A notification would be sent to all users about: ${currentUser.displayName || 'Anonymous'} added "${text}" to places to visit`);
-      
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error("Error adding note:", errorMessage);
