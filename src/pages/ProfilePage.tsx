@@ -185,68 +185,86 @@ const ProfilePage: React.FC = () => {
 
   // Test notification
   const handleTestNotification = async () => {
-    if (!('Notification' in window)) {
-      setSnackbarMessage('This browser does not support notifications');
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-      return;
-    }
-    
-    if (Notification.permission === 'granted') {
-      try {
-        // Create and show a test notification with a unique tag
-        const notification = new Notification('Test Notification', {
-          body: 'This is a test notification from Doha Itinerary',
-          icon: '/logo192.png',
-          tag: 'test-notification-' + Date.now() // Ensure uniqueness
-        });
-        
-        notification.onclick = () => {
-          console.log('Notification clicked');
-          window.focus();
-        };
-        
-        // Also store the test notification in the user's notifications in Firebase
-        if (currentUser) {
-          try {
-            const userId = currentUser.uid;
-            const notificationsRef = ref(database, `users/${userId}/notifications`);
-            const snapshot = await get(notificationsRef);
-            
-            let notifications = [];
-            if (snapshot.exists()) {
-              notifications = snapshot.val();
-            }
-            
-            // Add the test notification
-            const testNotification = {
-              id: Date.now(),
-              title: 'Test Notification',
-              body: 'This is a test notification from Doha Itinerary',
-              timestamp: new Date().toISOString(),
-              read: true // Mark as read since we already displayed it
-            };
-            
-            await set(notificationsRef, [...notifications, testNotification]);
-            console.log('Test notification stored in Firebase');
-          } catch (error) {
-            console.error('Error storing test notification:', error);
-          }
-        }
-        
-        setSnackbarMessage('Test notification sent');
-        setSnackbarSeverity('success');
+    try {
+      console.log('Testing notification system...');
+      
+      // Check if the user is logged in
+      if (!currentUser) {
+        setSnackbarMessage('You must be logged in to test notifications');
+        setSnackbarSeverity('warning');
         setSnackbarOpen(true);
-      } catch (error: unknown) {
-        console.error('Error sending test notification:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        setSnackbarMessage('Error sending test notification: ' + errorMessage);
-        setSnackbarSeverity('error');
+        return;
+      }
+      
+      // Create a test notification in Firebase regardless of permission status
+      const userId = currentUser.uid;
+      
+      // First, check what notification method this user should use
+      const notificationMethodRef = ref(database, `users/${userId}/notificationMethod`);
+      const notificationMethodSnapshot = await get(notificationMethodRef);
+      const notificationMethod = notificationMethodSnapshot.exists() 
+        ? notificationMethodSnapshot.val() 
+        : 'push'; // Default to push if not set
+      
+      console.log('User notification method:', notificationMethod);
+      
+      // Get existing notifications
+      const notificationsRef = ref(database, `users/${userId}/notifications`);
+      const snapshot = await get(notificationsRef);
+      
+      let notifications = [];
+      if (snapshot.exists()) {
+        notifications = snapshot.val();
+      }
+      
+      // Add the test notification
+      const testNotification = {
+        id: Date.now(),
+        title: 'Test Notification',
+        body: 'This is a test notification from Doha Itinerary',
+        timestamp: new Date().toISOString(),
+        read: false // Mark as unread so it will be picked up by the polling mechanism
+      };
+      
+      await set(notificationsRef, [...notifications, testNotification]);
+      console.log('Test notification stored in Firebase');
+      
+      // If notification permission is granted and we're using push notifications, also show a direct notification
+      if (notificationMethod === 'push' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          // Create and show a test notification with a unique tag
+          const notification = new Notification('Test Notification', {
+            body: 'This is a test notification from Doha Itinerary',
+            icon: '/logo192.png',
+            tag: 'test-notification-' + Date.now() // Ensure uniqueness
+          });
+          
+          notification.onclick = () => {
+            console.log('Notification clicked');
+            window.focus();
+          };
+          
+          setSnackbarMessage('Test notification sent via push notification');
+          setSnackbarSeverity('success');
+          setSnackbarOpen(true);
+        } catch (error: unknown) {
+          console.error('Error sending test notification:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          setSnackbarMessage('Error sending test notification: ' + errorMessage);
+          setSnackbarSeverity('error');
+          setSnackbarOpen(true);
+        }
+      } else {
+        // If we're using in-app notifications or permission is not granted
+        setSnackbarMessage('Test notification created. You will see it shortly via the in-app notification system.');
+        setSnackbarSeverity('info');
         setSnackbarOpen(true);
       }
-    } else {
-      setSnackbarMessage('Notification permission not granted');
-      setSnackbarSeverity('warning');
+    } catch (error: unknown) {
+      console.error('Error in handleTestNotification:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setSnackbarMessage('Error creating test notification: ' + errorMessage);
+      setSnackbarSeverity('error');
       setSnackbarOpen(true);
     }
   };
@@ -699,7 +717,6 @@ const ProfilePage: React.FC = () => {
                 variant="contained" 
                 color="primary" 
                 onClick={handleTestNotification}
-                disabled={Notification.permission !== 'granted'}
                 sx={{ mt: 1 }}
               >
                 Test Notification

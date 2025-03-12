@@ -470,32 +470,153 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
 
   // Request notification permission when user logs in
   useEffect(() => {
-    if (currentUser && notificationSettings.push) {
-      console.log('Requesting notification permission for user:', currentUser.email);
-      requestNotificationPermission()
-        .then(token => {
-          console.log('FCM Token received:', token);
-          if (!token) {
-            console.warn('No FCM token received');
+    if (!currentUser) return;
+    
+    const setupNotifications = async () => {
+      console.log('Setting up notifications for user:', currentUser.email);
+      
+      // Check if notifications are supported
+      if (!('Notification' in window)) {
+        console.log('This browser does not support notifications. Using in-app notifications only.');
+        
+        // Mark this user for in-app notifications
+        const userId = currentUser.uid;
+        const notificationMethodRef = ref(database, `users/${userId}/notificationMethod`);
+        await set(notificationMethodRef, 'in-app');
+        return;
+      }
+      
+      // Check current permission status
+      console.log('Current notification permission status:', Notification.permission);
+      
+      // If permission is already denied, set up in-app notifications
+      if (Notification.permission === 'denied') {
+        console.warn('Notification permission is denied. Using in-app notifications only.');
+        
+        // Mark this user for in-app notifications
+        const userId = currentUser.uid;
+        const notificationMethodRef = ref(database, `users/${userId}/notificationMethod`);
+        await set(notificationMethodRef, 'in-app');
+        return;
+      }
+      
+      // If permission is granted or default, try to get FCM token
+      try {
+        const token = await requestNotificationPermission();
+        console.log('FCM Token result:', token ? 'Received' : 'Not received');
+        
+        // If no token was received, fall back to in-app notifications
+        if (!token) {
+          console.warn('No FCM token received. Using in-app notifications as fallback.');
+          
+          // Mark this user for in-app notifications
+          const userId = currentUser.uid;
+          const notificationMethodRef = ref(database, `users/${userId}/notificationMethod`);
+          await set(notificationMethodRef, 'in-app');
+        }
+      } catch (err) {
+        console.error('Error setting up notifications:', err);
+        
+        // Mark this user for in-app notifications due to error
+        const userId = currentUser.uid;
+        const notificationMethodRef = ref(database, `users/${userId}/notificationMethod`);
+        await set(notificationMethodRef, 'in-app');
+      }
+    };
+    
+    // Set up notifications
+    setupNotifications();
+  }, [currentUser]);
+
+  // Set up polling for new notifications (works even when notification permissions are denied)
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    // Store the last notification timestamp we've seen
+    let lastNotificationTimestamp = Date.now();
+    
+    // Function to check for new notifications
+    const checkForNewNotifications = async () => {
+      try {
+        // Get user's notification method
+        const userId = currentUser.uid;
+        const notificationMethodRef = ref(database, `users/${userId}/notificationMethod`);
+        const notificationMethodSnapshot = await get(notificationMethodRef);
+        const notificationMethod = notificationMethodSnapshot.exists() 
+          ? notificationMethodSnapshot.val() 
+          : 'push'; // Default to push if not set
+        
+        // Get user's notifications
+        const notificationsRef = ref(database, `users/${userId}/notifications`);
+        const notificationsSnapshot = await get(notificationsRef);
+        
+        if (notificationsSnapshot.exists()) {
+          const notifications = notificationsSnapshot.val();
+          
+          // Find notifications newer than our last check
+          const newNotifications = notifications.filter((notification: any) => {
+            const notificationTime = new Date(notification.timestamp).getTime();
+            return notificationTime > lastNotificationTimestamp && !notification.read;
+          });
+          
+          if (newNotifications.length > 0) {
+            console.log(`Found ${newNotifications.length} new notifications`);
             
-            // Check if permission was denied
-            if (Notification.permission === 'denied') {
-              // Show a snackbar or alert to guide the user on enabling notifications
-              alert('Notifications are blocked. Please enable them in your browser settings to receive notifications when new places are added.');
-              
-              // Update notification settings to reflect the denied state
-              updateNotificationSettings({
-                ...notificationSettings,
-                push: false
-              });
+            // Update our timestamp to the newest notification
+            const newestNotification = newNotifications.reduce((newest: any, notification: any) => {
+              const notificationTime = new Date(notification.timestamp).getTime();
+              const newestTime = new Date(newest.timestamp).getTime();
+              return notificationTime > newestTime ? notification : newest;
+            }, newNotifications[0]);
+            
+            lastNotificationTimestamp = new Date(newestNotification.timestamp).getTime();
+            
+            // If using push notifications and permission is granted, try to show a notification
+            if (notificationMethod === 'push' && 'Notification' in window && Notification.permission === 'granted') {
+              try {
+                const notification = new Notification(newestNotification.title, {
+                  body: newestNotification.body,
+                  icon: '/logo192.png',
+                  tag: `stored-notification-${newestNotification.id}`
+                });
+                
+                notification.onclick = () => {
+                  window.focus();
+                };
+                
+                console.log('Displayed push notification for new notification');
+              } catch (error) {
+                console.error('Error showing push notification:', error);
+              }
             }
+            
+            // Mark notifications as read (regardless of notification method)
+            // This ensures they won't be shown again by the in-app notification component
+            const updatedNotifications = notifications.map((notification: any) => ({
+              ...notification,
+              read: true
+            }));
+            
+            await set(notificationsRef, updatedNotifications);
+            console.log('Marked notifications as read');
           }
-        })
-        .catch(err => {
-          console.error('Error requesting notification permission:', err);
-        });
-    }
-  }, [currentUser, notificationSettings.push]);
+        }
+      } catch (error) {
+        console.error('Error checking for new notifications:', error);
+      }
+    };
+    
+    // Check immediately on login
+    checkForNewNotifications();
+    
+    // Then set up a polling interval (every 30 seconds)
+    const intervalId = setInterval(checkForNewNotifications, 30000);
+    
+    // Clean up on unmount
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [currentUser]);
 
   // Function to send notification to all users except the author
   const sendNotificationToUsers = async (noteAuthor: string, noteText: string) => {

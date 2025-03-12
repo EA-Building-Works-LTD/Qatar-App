@@ -9,6 +9,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { FirebaseProvider, useFirebase } from './contexts/FirebaseContext';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import InAppNotification from './components/InAppNotification';
 
 // Import page components
 import HomePage from './pages/HomePage';
@@ -86,6 +87,7 @@ function App() {
       <FirebaseProvider>
         <ThemeProvider>
           <Router>
+            <InAppNotification />
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/*" element={<ProtectedRoutes />} />

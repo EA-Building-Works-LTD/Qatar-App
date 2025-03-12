@@ -1,8 +1,8 @@
 // Give the service worker access to Firebase Messaging.
 // Note that you can only use Firebase Messaging here. Other Firebase libraries
 // are not available in the service worker.
-importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js');
 
 // Initialize the Firebase app in the service worker by passing in
 // your app's Firebase config object.
@@ -20,19 +20,21 @@ firebase.initializeApp({
 // Retrieve an instance of Firebase Messaging so that it can handle background messages.
 const messaging = firebase.messaging();
 
-// Keep track of displayed notifications to prevent duplicates
-const displayedNotifications = new Set();
+// Store for tracking notification IDs to prevent duplicates
+const processedNotifications = new Set();
 
 // Log when the service worker is installed
 self.addEventListener('install', (event) => {
   console.log('[firebase-messaging-sw.js] Service Worker installed');
+  // Force the waiting service worker to become the active service worker
   self.skipWaiting();
 });
 
 // Log when the service worker is activated
 self.addEventListener('activate', (event) => {
   console.log('[firebase-messaging-sw.js] Service Worker activated');
-  return self.clients.claim();
+  // Tell the active service worker to take control of the page immediately
+  event.waitUntil(self.clients.claim());
 });
 
 // Handle messages from the client
@@ -44,21 +46,28 @@ self.addEventListener('message', (event) => {
     const notificationId = payload.tag || `notification-${Date.now()}`;
     
     // Check if we've already shown this notification
-    if (displayedNotifications.has(notificationId)) {
+    if (processedNotifications.has(notificationId)) {
       console.log('[firebase-messaging-sw.js] Notification already displayed:', notificationId);
       return;
     }
     
     // Add to our tracking set
-    displayedNotifications.add(notificationId);
+    processedNotifications.add(notificationId);
     
     // Show the notification
     self.registration.showNotification(payload.title, {
       body: payload.body,
       icon: payload.icon || '/logo192.png',
-      badge: '/logo192.png',
+      badge: '/badge-icon.png',
       tag: notificationId,
-      data: payload.data || {}
+      data: payload.data || {},
+      vibrate: [200, 100, 200], // Vibration pattern for mobile devices
+      requireInteraction: false, // Don't require interaction on mobile
+      renotify: false // Don't notify again if the tag is the same
+    }).then(() => {
+      console.log('[firebase-messaging-sw.js] Notification shown successfully');
+    }).catch(error => {
+      console.error('[firebase-messaging-sw.js] Error showing notification:', error);
     });
     
     console.log('[firebase-messaging-sw.js] Notification shown from client message');
@@ -66,51 +75,143 @@ self.addEventListener('message', (event) => {
 });
 
 // Handle background messages
-messaging.onBackgroundMessage((payload) => {
+messaging.onBackgroundMessage(function(payload) {
   console.log('[firebase-messaging-sw.js] Received background message:', payload);
-
-  const notificationTitle = payload.notification.title || 'New Notification';
-  const notificationBody = payload.notification.body || '';
-  const notificationId = payload.data?.notificationId || `fcm-${Date.now()}`;
   
-  // Check if we've already shown this notification
-  if (displayedNotifications.has(notificationId)) {
-    console.log('[firebase-messaging-sw.js] FCM notification already displayed:', notificationId);
-    return;
+  try {
+    // Extract notification data
+    const notificationData = payload.notification || payload.data || {};
+    const notificationId = notificationData.tag || `notification-${Date.now()}`;
+    
+    // Check if we've already processed this notification
+    if (processedNotifications.has(notificationId)) {
+      console.log('[firebase-messaging-sw.js] Duplicate notification detected, skipping:', notificationId);
+      return;
+    }
+    
+    // Add to processed set (with a maximum size to prevent memory issues)
+    processedNotifications.add(notificationId);
+    if (processedNotifications.size > 100) {
+      // Remove the oldest entry if we have too many
+      processedNotifications.delete(processedNotifications.values().next().value);
+    }
+    
+    // Create notification options
+    const notificationOptions = {
+      body: notificationData.body || 'New notification',
+      icon: notificationData.icon || '/logo192.png',
+      badge: '/badge-icon.png',
+      tag: notificationId,
+      data: {
+        url: notificationData.click_action || '/',
+        ...payload.data
+      },
+      vibrate: [200, 100, 200], // Vibration pattern for mobile devices
+      requireInteraction: false, // Don't require interaction on mobile
+      renotify: false // Don't notify again if the tag is the same
+    };
+    
+    // Show the notification
+    return self.registration.showNotification(
+      notificationData.title || 'Doha Itinerary',
+      notificationOptions
+    ).then(() => {
+      console.log('[firebase-messaging-sw.js] Background notification shown successfully');
+    }).catch(error => {
+      console.error('[firebase-messaging-sw.js] Error showing background notification:', error);
+    });
+  } catch (error) {
+    console.error('[firebase-messaging-sw.js] Error processing background message:', error);
   }
-  
-  // Add to our tracking set
-  displayedNotifications.add(notificationId);
-
-  const notificationOptions = {
-    body: notificationBody,
-    icon: '/logo192.png',
-    badge: '/logo192.png',
-    tag: notificationId,
-    data: payload.data || {}
-  };
-
-  return self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
-// Handle notification clicks
-self.addEventListener('notificationclick', (event) => {
+// Handle notification click
+self.addEventListener('notificationclick', function(event) {
   console.log('[firebase-messaging-sw.js] Notification clicked:', event);
   
+  // Close the notification
   event.notification.close();
   
-  // This looks to see if the current is already open and focuses if it is
+  // Get the notification data
+  const clickAction = event.notification.data?.url || '/';
+  
+  // Open or focus the app
   event.waitUntil(
-    clients.matchAll({
-      type: "window"
-    })
-    .then((clientList) => {
-      for (const client of clientList) {
-        if (client.url === '/' && 'focus' in client)
-          return client.focus();
-      }
-      if (clients.openWindow)
-        return clients.openWindow('/');
-    })
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(function(clientList) {
+        // Check if there's already a window/tab open with the target URL
+        for (let i = 0; i < clientList.length; i++) {
+          const client = clientList[i];
+          if (client.url.includes(self.location.origin) && 'focus' in client) {
+            return client.focus();
+          }
+        }
+        
+        // If no window/tab is open, open a new one
+        if (clients.openWindow) {
+          return clients.openWindow(clickAction);
+        }
+      })
   );
+});
+
+// Handle notification close
+self.addEventListener('notificationclose', function(event) {
+  console.log('[firebase-messaging-sw.js] Notification closed:', event);
+});
+
+// Handle push events directly (as a fallback)
+self.addEventListener('push', function(event) {
+  console.log('[firebase-messaging-sw.js] Push received:', event);
+  
+  // Ensure the event has data
+  if (!event.data) return;
+  
+  try {
+    // Try to parse the data
+    const data = event.data.json();
+    console.log('[firebase-messaging-sw.js] Push data:', data);
+    
+    // Extract notification data
+    const notificationData = data.notification || data.data || {};
+    const notificationId = notificationData.tag || `push-${Date.now()}`;
+    
+    // Check if we've already processed this notification
+    if (processedNotifications.has(notificationId)) {
+      console.log('[firebase-messaging-sw.js] Duplicate push notification detected, skipping:', notificationId);
+      return;
+    }
+    
+    // Add to processed set
+    processedNotifications.add(notificationId);
+    
+    // Create notification options
+    const notificationOptions = {
+      body: notificationData.body || 'New notification',
+      icon: notificationData.icon || '/logo192.png',
+      badge: '/badge-icon.png',
+      tag: notificationId,
+      data: {
+        url: notificationData.click_action || '/',
+        ...data.data
+      },
+      vibrate: [200, 100, 200], // Vibration pattern for mobile devices
+      requireInteraction: false, // Don't require interaction on mobile
+      renotify: false // Don't notify again if the tag is the same
+    };
+    
+    // Show the notification
+    event.waitUntil(
+      self.registration.showNotification(
+        notificationData.title || 'Doha Itinerary',
+        notificationOptions
+      ).then(() => {
+        console.log('[firebase-messaging-sw.js] Push notification shown successfully');
+      }).catch(error => {
+        console.error('[firebase-messaging-sw.js] Error showing push notification:', error);
+      })
+    );
+  } catch (error) {
+    console.error('[firebase-messaging-sw.js] Error handling push event:', error);
+  }
 }); 
