@@ -43,7 +43,7 @@ export interface Preferences {
   sound: boolean;
 }
 
-// Define Person type for expenses
+// Define Expense type for expenses
 export interface Expense {
   id: number;
   description: string;
@@ -51,6 +51,7 @@ export interface Expense {
   date: string;
   category: string;
   paidBy: string;
+  timestamp: string;
   split?: {
     type: 'equal' | 'custom' | 'percentage';
     details?: {
@@ -64,12 +65,21 @@ export interface Expense {
 export interface Person {
   id: number;
   name: string;
+  email?: string;
   expenses: Expense[];
 }
 
 export interface ExpensesData {
   people: Person[];
   totalSpent: number;
+  lastUpdated?: {
+    timestamp: string;
+    by: {
+      uid: string;
+      email: string | null;
+      name: string;
+    }
+  };
 }
 
 // Define a constant for the shared trip ID
@@ -115,6 +125,31 @@ export const useFirebase = () => {
 
 interface FirebaseProviderProps {
   children: ReactNode;
+}
+
+// Function to remove undefined values from objects (add after imports before other code)
+function sanitizeForFirebase(data: any): any {
+  if (data === null || data === undefined) {
+    return null; // Firebase accepts null but not undefined
+  }
+  
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeForFirebase(item));
+  }
+  
+  if (typeof data === 'object') {
+    const cleanObject: Record<string, any> = {};
+    
+    Object.keys(data).forEach(key => {
+      if (data[key] !== undefined) {
+        cleanObject[key] = sanitizeForFirebase(data[key]);
+      }
+    });
+    
+    return cleanObject;
+  }
+  
+  return data;
 }
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
@@ -300,7 +335,16 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         const sharedExpensesDataRef = ref(database, `shared/${SHARED_TRIP_ID}/expensesData`);
         const expensesUnsubscribe = onValue(sharedExpensesDataRef, async (snapshot) => {
           if (snapshot.exists()) {
-            setExpensesData(snapshot.val());
+            const data = snapshot.val();
+            console.log(`Received expenses update from Firebase at ${new Date().toLocaleTimeString()}`);
+            
+            // Check if this is an update from another user
+            if (data.lastUpdated && data.lastUpdated.by && currentUser && data.lastUpdated.by.uid !== currentUser.uid) {
+              console.log(`Expense data updated by ${data.lastUpdated.by.name} (${data.lastUpdated.by.email})`);
+            }
+            
+            // Always update the local state with the latest data
+            setExpensesData(data);
           } else {
             // Initialize with actual user profiles
             const userProfiles = await fetchUserProfiles();
@@ -348,7 +392,15 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
 
             const defaultExpensesData = {
               people,
-              totalSpent: 0
+              totalSpent: 0,
+              lastUpdated: {
+                timestamp: new Date().toISOString(),
+                by: {
+                  uid: user ? user.uid : 'system',
+                  email: user ? user.email : 'system@example.com',
+                  name: user ? user.displayName || 'User' : 'System'
+                }
+              }
             };
 
             setExpensesData(defaultExpensesData);
@@ -357,6 +409,10 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
               console.error("Error setting default expenses data:", err);
             });
           }
+        }, (error) => {
+          console.error("Error loading expenses data:", error);
+          // Show error to user
+          setError("Failed to load expenses data. Please refresh the page.");
         });
         
         // Set up listener for shared itinerary data
@@ -850,12 +906,36 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       
       // Update shared expenses data
       const sharedExpensesRef: DatabaseReference = ref(database, `shared/${SHARED_TRIP_ID}/expensesData`);
-      await set(sharedExpensesRef, newData);
+      
+      // Add metadata to help with synchronization
+      const updatedData = {
+        ...newData,
+        lastUpdated: {
+          timestamp: new Date().toISOString(),
+          by: {
+            uid: currentUser.uid,
+            email: currentUser.email,
+            name: currentUser.displayName || 'Anonymous'
+          }
+        }
+      };
+      
+      // Sanitize the data to remove any undefined values
+      const sanitizedData = sanitizeForFirebase(updatedData);
+      
+      // Use set function (without merge option which is not supported in Realtime Database)
+      await set(sharedExpensesRef, sanitizedData);
+      
       // No need to update local state here as the onValue listener will handle it
-      console.log("Shared expenses data successfully updated in Firebase");
+      console.log(`Shared expenses data successfully updated in Firebase at ${new Date().toLocaleTimeString()}`);
+      
+      // Force update any local state
+      setExpensesData(updatedData);
+      
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      console.error("Error updating expenses data:", errorMessage);
+      console.error("Error updating expenses data:", errorMessage, err);
+      alert("Error updating expenses. Please try again or refresh the page.");
       // Don't throw the error, just log it
     }
   };

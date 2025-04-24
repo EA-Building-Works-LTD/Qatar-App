@@ -50,6 +50,7 @@ interface Expense {
   date: string;
   category: string;
   paidBy: string;
+  timestamp?: string; // Make optional to match FirebaseContext
   split?: {
     type: 'equal' | 'custom' | 'percentage';
     details?: {
@@ -322,7 +323,7 @@ const ExpensesPage: React.FC = () => {
     return personPaid - personOwes;
   };
 
-  // Calculate detailed balances between people
+  // Calculate detailed balances between people for the most efficient settlement
   const calculateDetailedBalances = () => {
     const balances: { from: string; to: string; amount: number }[] = [];
     
@@ -330,19 +331,41 @@ const ExpensesPage: React.FC = () => {
       return balances;
     }
     
-    // Calculate each person's balance
-    const personBalances = expensesData.people.map(person => ({
-      name: person.name,
-      balance: calculateBalance(person.id)
-    }));
+    // Calculate the fair share per person (equal split among all people)
+    const totalSpent = expensesData.people.reduce((total, person) => {
+      if (!person.expenses || !Array.isArray(person.expenses)) {
+        return total;
+      }
+      return total + person.expenses.reduce((sum, expense) => sum + expense.amount, 0);
+    }, 0);
+    
+    const fairShare = totalSpent / expensesData.people.length;
+    
+    // Calculate how much each person paid and their balance
+    const personBalances = expensesData.people.map(person => {
+      const paid = expensesData.people.reduce((total, p) => {
+        if (!p.expenses || !Array.isArray(p.expenses)) {
+          return total;
+        }
+        return total + p.expenses.reduce((sum, expense) => {
+          // Only count expenses where this person paid
+          return expense.paidBy === person.name ? sum + expense.amount : sum;
+        }, 0);
+      }, 0);
+      
+      return {
+        name: person.name,
+        balance: paid - fairShare // Positive: gets money back, Negative: owes money
+      };
+    });
     
     // Sort by balance (descending) - people who are owed money first
     personBalances.sort((a, b) => b.balance - a.balance);
     
     // People with positive balance are owed money
-    const creditors = personBalances.filter(p => p.balance > 0);
+    const creditors = personBalances.filter(p => p.balance > 0.01); // Use small epsilon to handle floating point
     // People with negative balance owe money
-    const debtors = personBalances.filter(p => p.balance < 0);
+    const debtors = personBalances.filter(p => p.balance < -0.01);
     
     // For each person who is owed money
     for (const creditor of creditors) {
@@ -350,23 +373,29 @@ const ExpensesPage: React.FC = () => {
       
       // For each person who owes money
       for (let i = 0; i < debtors.length && remainingToReceive > 0.01; i++) {
-        const debtor = debtors[i];
-        const remainingToPay = Math.abs(debtor.balance);
+        if (debtors[i].balance >= -0.01) continue; // Skip if this debtor's balance is already settled
+        
+        const remainingToPay = Math.abs(debtors[i].balance);
         
         if (remainingToPay > 0.01) {
           // Calculate how much this debtor should pay to this creditor
           const transferAmount = Math.min(remainingToReceive, remainingToPay);
           
-          // Add to balances
-          balances.push({
-            from: debtor.name,
-            to: creditor.name,
-            amount: parseFloat(transferAmount.toFixed(2))
-          });
+          // Round to 2 decimal places to avoid tiny transfers
+          const roundedAmount = Math.round(transferAmount * 100) / 100;
           
-          // Update remaining amounts
-          remainingToReceive -= transferAmount;
-          debtor.balance += transferAmount; // Reduce debt (negative becomes less negative)
+          if (roundedAmount > 0.01) {
+            // Add to balances
+            balances.push({
+              from: debtors[i].name,
+              to: creditor.name,
+              amount: roundedAmount
+            });
+            
+            // Update remaining amounts
+            remainingToReceive -= roundedAmount;
+            debtors[i].balance += roundedAmount; // Reduce debt (negative becomes less negative)
+          }
         }
       }
     }
@@ -455,14 +484,42 @@ const ExpensesPage: React.FC = () => {
     // If paidBy is empty, use the current person's name
     const paidBy = expenseForm.paidBy || expensesData.people[personIndex].name;
     
-    // Process split details for saving
-    const splitDetails = expenseForm.split.details
-      .filter(detail => detail.included !== false)
-      .map(({ personName, amount, percentage }) => ({
-        personName,
-        amount,
-        percentage
-      }));
+    // Process split details for saving - only include fields that have values
+    const includedPeople = expenseForm.split.details.filter(detail => detail.included !== false);
+    
+    // Only add split details if there are included people and it's not an equal split
+    let splitConfig: {
+      type: 'equal' | 'custom' | 'percentage';
+      details?: {
+        personName: string;
+        amount?: number;
+        percentage?: number;
+      }[];
+    } = {
+      type: expenseForm.split.type
+    };
+    
+    // For all split types, create a properly structured split configuration
+    if (includedPeople.length > 0) {
+      // Create clean split details without undefined values
+      const cleanDetails = includedPeople.map(detail => {
+        const cleanDetail: { personName: string; amount?: number; percentage?: number } = {
+          personName: detail.personName
+        };
+        
+        if (expenseForm.split.type === 'custom' && typeof detail.amount === 'number') {
+          cleanDetail.amount = detail.amount;
+        } else if (expenseForm.split.type === 'percentage' && typeof detail.percentage === 'number') {
+          cleanDetail.percentage = detail.percentage;
+        }
+        
+        return cleanDetail;
+      });
+      
+      if (cleanDetails.length > 0) {
+        splitConfig.details = cleanDetails;
+      }
+    }
     
     const newExpense: Expense = {
       id: newId,
@@ -471,13 +528,12 @@ const ExpensesPage: React.FC = () => {
       date: expenseForm.date,
       category: expenseForm.category,
       paidBy: paidBy,
-      split: {
-        type: expenseForm.split.type,
-        details: splitDetails.length > 0 ? splitDetails : undefined
-      }
+      timestamp: new Date().toISOString(),
+      split: splitConfig
     };
     
-    const updatedPeople = [...expensesData.people];
+    // Deep clone the current expenses data to avoid mutation issues
+    const updatedPeople = JSON.parse(JSON.stringify(expensesData.people));
     
     // Ensure expenses array exists
     if (!updatedPeople[personIndex].expenses) {
@@ -485,13 +541,17 @@ const ExpensesPage: React.FC = () => {
     }
     
     updatedPeople[personIndex].expenses.push(newExpense);
-    
+      
+    // Show feedback to user that expense is being added
+    console.log(`Adding expense: ${newExpense.description} for ${amount.toFixed(2)} QAR`);
+      
+    // Update expenses data in Firebase with metadata
     updateExpensesData({
       ...expensesData,
       people: updatedPeople,
       totalSpent: expensesData.totalSpent + amount
     });
-    
+      
     // Reset form
     setExpenseForm({
       description: '',
@@ -533,14 +593,42 @@ const ExpensesPage: React.FC = () => {
     // Ensure paidBy is set to a valid person
     const paidBy = expenseForm.paidBy || expensesData.people[personIndex].name;
     
-    // Process split details for saving
-    const splitDetails = expenseForm.split.details
-      .filter(detail => detail.included !== false)
-      .map(({ personName, amount, percentage }) => ({
-        personName,
-        amount,
-        percentage
-      }));
+    // Process split details for saving - only include fields that have values
+    const includedPeople = expenseForm.split.details.filter(detail => detail.included !== false);
+    
+    // Only add split details if there are included people and it's not an equal split
+    let splitConfig: {
+      type: 'equal' | 'custom' | 'percentage';
+      details?: {
+        personName: string;
+        amount?: number;
+        percentage?: number;
+      }[];
+    } = {
+      type: expenseForm.split.type
+    };
+    
+    // For all split types, create a properly structured split configuration
+    if (includedPeople.length > 0) {
+      // Create clean split details without undefined values
+      const cleanDetails = includedPeople.map(detail => {
+        const cleanDetail: { personName: string; amount?: number; percentage?: number } = {
+          personName: detail.personName
+        };
+        
+        if (expenseForm.split.type === 'custom' && typeof detail.amount === 'number') {
+          cleanDetail.amount = detail.amount;
+        } else if (expenseForm.split.type === 'percentage' && typeof detail.percentage === 'number') {
+          cleanDetail.percentage = detail.percentage;
+        }
+        
+        return cleanDetail;
+      });
+      
+      if (cleanDetails.length > 0) {
+        splitConfig.details = cleanDetails;
+      }
+    }
     
     const updatedPeople = [...expensesData.people];
     updatedPeople[personIndex].expenses[expenseIndex] = {
@@ -550,10 +638,7 @@ const ExpensesPage: React.FC = () => {
       date: expenseForm.date,
       category: expenseForm.category,
       paidBy: paidBy,
-      split: {
-        type: expenseForm.split.type,
-        details: splitDetails.length > 0 ? splitDetails : undefined
-      }
+      split: splitConfig
     };
     
     updateExpensesData({
@@ -1134,7 +1219,7 @@ const ExpensesPage: React.FC = () => {
                   boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)'
                 }}>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                    Per Person (Average)
+                    Per Person (Equal Split)
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main' }}>
                     QAR {calculateAveragePerPerson().toFixed(2)}
@@ -1144,7 +1229,67 @@ const ExpensesPage: React.FC = () => {
             </Grid>
             
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1, mt: 2 }}>
-              Individual Balances
+              Individual Expenditures
+            </Typography>
+            
+            <Box sx={{ 
+              bgcolor: 'rgba(255, 255, 255, 0.7)',
+              borderRadius: 2,
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
+              p: 2, 
+              mb: 3
+            }}>
+              {expensesData && expensesData.people && Array.isArray(expensesData.people) && expensesData.people.map(person => {
+                const spent = calculatePersonPaid(person.name);
+                const shouldPay = calculateAveragePerPerson();
+                const difference = spent - shouldPay;
+                
+                return (
+                  <Box 
+                    key={person.id}
+                    sx={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      py: 1,
+                      borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
+                      '&:last-child': {
+                        borderBottom: 'none'
+                      }
+                    }}
+                  >
+                    <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                      {person.name}
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                        Paid: QAR {spent.toFixed(2)}
+                      </Typography>
+                      <Typography 
+                        variant="body2" 
+                        sx={{ 
+                          fontWeight: 600,
+                          color: difference > 0 
+                            ? 'success.main' 
+                            : difference < 0 
+                              ? 'error.main' 
+                              : 'text.secondary'
+                        }}
+                      >
+                        {difference > 0 
+                          ? `Gets back QAR ${difference.toFixed(2)}` 
+                          : difference < 0 
+                            ? `Owes QAR ${Math.abs(difference).toFixed(2)}` 
+                            : `Settled`}
+                      </Typography>
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Box>
+            
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+              Settlement Plan
             </Typography>
             
             <Box sx={{ 
@@ -1153,38 +1298,46 @@ const ExpensesPage: React.FC = () => {
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
               p: 2
             }}>
-              {expensesData && expensesData.people && Array.isArray(expensesData.people) && expensesData.people.map(person => (
-                <Box 
-                  key={person.id}
-                  sx={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    py: 1,
-                    borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
-                    '&:last-child': {
-                      borderBottom: 'none'
-                    }
-                  }}
-                >
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                    {person.name}
+              {calculateDetailedBalances().length === 0 ? (
+                <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary', textAlign: 'center' }}>
+                  All balances are settled
+                </Typography>
+              ) : (
+                <>
+                  <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+                    To settle all debts, make the following payments:
                   </Typography>
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      fontWeight: 600,
-                      color: calculateBalance(person.id) > 0 
-                        ? 'success.main' 
-                        : calculateBalance(person.id) < 0 
-                          ? 'error.main' 
-                          : 'text.secondary'
-                    }}
-                  >
-                    {formatBalanceText(person.id)}
-                  </Typography>
-                </Box>
-              ))}
+                  {calculateDetailedBalances().map((transfer, index) => (
+                    <Box 
+                      key={index}
+                      sx={{ 
+                        display: 'flex', 
+                        alignItems: 'center',
+                        mb: index < calculateDetailedBalances().length - 1 ? 2 : 0
+                      }}
+                    >
+                      <Box 
+                        sx={{ 
+                          width: 8, 
+                          height: 8, 
+                          borderRadius: '50%', 
+                          bgcolor: 'primary.main',
+                          mr: 1 
+                        }} 
+                      />
+                      <Typography variant="body1">
+                        <strong>{transfer.from}</strong> pays <strong>QAR {transfer.amount.toFixed(2)}</strong> to <strong>{transfer.to}</strong>
+                      </Typography>
+                    </Box>
+                  ))}
+                  <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(51, 102, 255, 0.1)', borderRadius: 2 }}>
+                    <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center' }}>
+                      <InfoIcon sx={{ fontSize: 16, mr: 1, color: 'primary.main' }} />
+                      This is the simplest way to settle all debts with the minimum number of transactions.
+                    </Typography>
+                  </Box>
+                </>
+              )}
             </Box>
           </CardContent>
         </Card>
@@ -1318,7 +1471,12 @@ const ExpensesPage: React.FC = () => {
                   overflow: 'hidden'
                 }}>
                   {expensesData.people[currentTab]?.expenses
-                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                    .sort((a, b) => {
+                      // Use timestamp if available, fall back to date
+                      const timeA = a.timestamp ? new Date(a.timestamp).getTime() : new Date(a.date).getTime();
+                      const timeB = b.timestamp ? new Date(b.timestamp).getTime() : new Date(b.date).getTime();
+                      return timeB - timeA; // Most recent first
+                    })
                     .map((expense, index) => (
                       <React.Fragment key={expense.id}>
                         <ListItem
@@ -1464,7 +1622,7 @@ const ExpensesPage: React.FC = () => {
                 label="Paid By"
               >
                 <MenuItem value="">
-                  <em>{expensesData && expensesData.people && Array.isArray(expensesData.people) && expensesData.people.find(p => p.id === selectedPersonId)?.name || 'Self'}</em>
+                  <em>{(expensesData && expensesData.people && Array.isArray(expensesData.people) && expensesData.people.find(p => p.id === selectedPersonId)?.name) || 'Self'}</em>
                 </MenuItem>
                 {expensesData && expensesData.people && Array.isArray(expensesData.people) && expensesData.people.map(person => (
                   <MenuItem key={person.id} value={person.name}>{person.name}</MenuItem>
