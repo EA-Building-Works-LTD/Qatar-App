@@ -25,12 +25,21 @@ import {
   SelectChangeEvent,
   FormControl,
   InputLabel,
-  InputAdornment
+  InputAdornment,
+  RadioGroup,
+  Radio,
+  FormControlLabel,
+  Checkbox,
+  Chip,
+  FormLabel,
+  Tooltip
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ReceiptIcon from '@mui/icons-material/Receipt';
+import SplitscreenIcon from '@mui/icons-material/Splitscreen';
+import InfoIcon from '@mui/icons-material/Info';
 import { useFirebase } from '../contexts/FirebaseContext';
 
 // Define interfaces for our data
@@ -41,6 +50,14 @@ interface Expense {
   date: string;
   category: string;
   paidBy: string;
+  split?: {
+    type: 'equal' | 'custom' | 'percentage';
+    details?: {
+      personName: string;
+      amount?: number;
+      percentage?: number;
+    }[];
+  };
 }
 
 interface Person {
@@ -83,7 +100,16 @@ const ExpensesPage: React.FC = () => {
     amount: '',
     date: new Date().toISOString().split('T')[0],
     category: 'Food',
-    paidBy: ''
+    paidBy: '',
+    split: {
+      type: 'equal' as 'equal' | 'custom' | 'percentage',
+      details: [] as {
+        personName: string;
+        amount?: number;
+        percentage?: number;
+        included?: boolean;
+      }[]
+    }
   });
 
   // Categories for expenses
@@ -116,6 +142,120 @@ const ExpensesPage: React.FC = () => {
         return expense.paidBy === person.name ? sum + expense.amount : sum;
       }, 0);
     }, 0);
+  };
+
+  // Calculate total amount owed to each person by others
+  const calculatePersonOwed = (personId: number) => {
+    if (!expensesData || !expensesData.people || !Array.isArray(expensesData.people)) {
+      return 0;
+    }
+    
+    const person = expensesData.people.find(p => p.id === personId);
+    if (!person) return 0;
+    
+    let totalOwed = 0;
+    
+    // Loop through all expenses in all people
+    expensesData.people.forEach(p => {
+      if (!p.expenses || !Array.isArray(p.expenses)) return;
+      
+      p.expenses.forEach(expense => {
+        // Skip if this person is not the payer
+        if (expense.paidBy !== person.name) return;
+        
+        // Handle different split types
+        if (expense.split?.type === 'equal') {
+          // For equal splits, everyone pays an equal share except the payer
+          const includedPeople = expense.split?.details 
+            ? expense.split.details.length 
+            : expensesData.people.length;
+          
+          if (includedPeople > 0) {
+            // Amount owed by others (total minus this person's share)
+            const sharePerPerson = expense.amount / includedPeople;
+            totalOwed += expense.amount - sharePerPerson;
+          }
+        } 
+        else if (expense.split?.type === 'custom' && expense.split.details) {
+          // For custom splits, sum up all amounts for people other than the payer
+          expense.split.details.forEach(detail => {
+            if (detail.personName !== person.name && detail.amount) {
+              totalOwed += detail.amount;
+            }
+          });
+        }
+        else if (expense.split?.type === 'percentage' && expense.split.details) {
+          // For percentage splits, calculate based on percentages
+          expense.split.details.forEach(detail => {
+            if (detail.personName !== person.name && detail.percentage) {
+              totalOwed += (expense.amount * detail.percentage) / 100;
+            }
+          });
+        }
+        else {
+          // Default behavior if no split specified: equal split among all people
+          const sharePerPerson = expense.amount / expensesData.people.length;
+          totalOwed += expense.amount - sharePerPerson;
+        }
+      });
+    });
+    
+    return totalOwed;
+  };
+
+  // Calculate total amount this person owes to others
+  const calculatePersonOwes = (personId: number) => {
+    if (!expensesData || !expensesData.people || !Array.isArray(expensesData.people)) {
+      return 0;
+    }
+    
+    const person = expensesData.people.find(p => p.id === personId);
+    if (!person) return 0;
+    
+    let totalOwes = 0;
+    
+    // Loop through all expenses in all people
+    expensesData.people.forEach(p => {
+      if (!p.expenses || !Array.isArray(p.expenses)) return;
+      
+      p.expenses.forEach(expense => {
+        // Skip if this person is the payer
+        if (expense.paidBy === person.name) return;
+        
+        // Handle different split types
+        if (expense.split?.type === 'equal') {
+          // For equal splits, check if person is included
+          const isIncluded = !expense.split.details || 
+            expense.split.details.some(detail => detail.personName === person.name);
+          
+          if (isIncluded) {
+            // Calculate equal share
+            const includedCount = expense.split.details?.length || expensesData.people.length;
+            totalOwes += expense.amount / includedCount;
+          }
+        } 
+        else if (expense.split?.type === 'custom' && expense.split.details) {
+          // For custom splits, find this person's amount
+          const personDetail = expense.split.details.find(detail => detail.personName === person.name);
+          if (personDetail && personDetail.amount) {
+            totalOwes += personDetail.amount;
+          }
+        }
+        else if (expense.split?.type === 'percentage' && expense.split.details) {
+          // For percentage splits, calculate based on this person's percentage
+          const personDetail = expense.split.details.find(detail => detail.personName === person.name);
+          if (personDetail && personDetail.percentage) {
+            totalOwes += (expense.amount * personDetail.percentage) / 100;
+          }
+        }
+        else {
+          // Default behavior if no split specified
+          totalOwes += expense.amount / expensesData.people.length;
+        }
+      });
+    });
+    
+    return totalOwes;
   };
 
   // Calculate the total amount spent by all people
@@ -167,12 +307,19 @@ const ExpensesPage: React.FC = () => {
     const person = expensesData.people.find(p => p.id === personId);
     if (!person) return 0;
     
-    const averagePerPerson = calculateAveragePerPerson();
+    // How much this person paid
     const personPaid = calculatePersonPaid(person.name);
     
-    // If person paid more than average, they get money back
-    // If person paid less than average, they owe money
-    return personPaid - averagePerPerson;
+    // How much this person owes to others
+    const personOwes = calculatePersonOwes(personId);
+    
+    // How much others owe to this person
+    const personOwed = calculatePersonOwed(personId);
+    
+    // Final balance
+    // Positive: person gets money back
+    // Negative: person owes money
+    return personPaid - personOwes;
   };
 
   // Calculate detailed balances between people
@@ -183,13 +330,10 @@ const ExpensesPage: React.FC = () => {
       return balances;
     }
     
-    const averagePerPerson = calculateAveragePerPerson();
-    
-    // Calculate how much each person has paid and their balance
+    // Calculate each person's balance
     const personBalances = expensesData.people.map(person => ({
       name: person.name,
-      paid: calculatePersonPaid(person.name),
-      balance: calculatePersonPaid(person.name) - averagePerPerson
+      balance: calculateBalance(person.id)
     }));
     
     // Sort by balance (descending) - people who are owed money first
@@ -311,13 +455,26 @@ const ExpensesPage: React.FC = () => {
     // If paidBy is empty, use the current person's name
     const paidBy = expenseForm.paidBy || expensesData.people[personIndex].name;
     
+    // Process split details for saving
+    const splitDetails = expenseForm.split.details
+      .filter(detail => detail.included !== false)
+      .map(({ personName, amount, percentage }) => ({
+        personName,
+        amount,
+        percentage
+      }));
+    
     const newExpense: Expense = {
       id: newId,
       description: expenseForm.description,
       amount: amount,
       date: expenseForm.date,
       category: expenseForm.category,
-      paidBy: paidBy
+      paidBy: paidBy,
+      split: {
+        type: expenseForm.split.type,
+        details: splitDetails.length > 0 ? splitDetails : undefined
+      }
     };
     
     const updatedPeople = [...expensesData.people];
@@ -341,7 +498,11 @@ const ExpensesPage: React.FC = () => {
       amount: '',
       date: new Date().toISOString().split('T')[0],
       category: 'Food',
-      paidBy: ''
+      paidBy: '',
+      split: {
+        type: 'equal',
+        details: []
+      }
     });
     
     setAddExpenseDialogOpen(false);
@@ -372,6 +533,15 @@ const ExpensesPage: React.FC = () => {
     // Ensure paidBy is set to a valid person
     const paidBy = expenseForm.paidBy || expensesData.people[personIndex].name;
     
+    // Process split details for saving
+    const splitDetails = expenseForm.split.details
+      .filter(detail => detail.included !== false)
+      .map(({ personName, amount, percentage }) => ({
+        personName,
+        amount,
+        percentage
+      }));
+    
     const updatedPeople = [...expensesData.people];
     updatedPeople[personIndex].expenses[expenseIndex] = {
       ...updatedPeople[personIndex].expenses[expenseIndex],
@@ -379,7 +549,11 @@ const ExpensesPage: React.FC = () => {
       amount: amount,
       date: expenseForm.date,
       category: expenseForm.category,
-      paidBy: paidBy
+      paidBy: paidBy,
+      split: {
+        type: expenseForm.split.type,
+        details: splitDetails.length > 0 ? splitDetails : undefined
+      }
     };
     
     updateExpensesData({
@@ -438,13 +612,53 @@ const ExpensesPage: React.FC = () => {
     
     const expense = expensesData.people[personIndex].expenses[expenseIndex];
     
+    // Prepare split details
+    let splitDetails: {
+      personName: string;
+      amount?: number;
+      percentage?: number;
+      included?: boolean;
+    }[] = [];
+    
+    if (expense.split && expense.split.details) {
+      // Use existing split details
+      const includedNames = expense.split.details.map(d => d.personName);
+      
+      splitDetails = expensesData.people.map(person => {
+        const existingDetail = expense.split?.details?.find(d => d.personName === person.name);
+        const included = includedNames.includes(person.name);
+        
+        if (existingDetail) {
+          return {
+            ...existingDetail,
+            included
+          };
+        } else {
+          return {
+            personName: person.name,
+            included: false
+          };
+        }
+      });
+    } else {
+      // Create default split details
+      splitDetails = expensesData.people.map(person => ({
+        personName: person.name,
+        included: true
+      }));
+    }
+    
     // Reset form with expense data
     setExpenseForm({
       description: expense.description,
       amount: expense.amount.toString(),
       date: expense.date,
       category: expense.category,
-      paidBy: expense.paidBy
+      paidBy: expense.paidBy,
+      split: {
+        type: expense.split?.type || 'equal',
+        details: splitDetails
+      }
     });
     
     setSelectedPersonId(personId);
@@ -457,10 +671,307 @@ const ExpensesPage: React.FC = () => {
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SelectChangeEvent
   ) => {
     const { name, value } = e.target as { name: string; value: string };
+    
+    if (name === 'amount' && value && expenseForm.split.type !== 'equal') {
+      // When amount changes, update the custom split amounts if using a non-equal split
+      const amount = parseFloat(value);
+      if (!isNaN(amount) && expensesData && expensesData.people) {
+        // Create or update split details based on the new amount
+        const splitDetails = expensesData.people.map(person => {
+          const existingDetail = expenseForm.split.details.find(d => d.personName === person.name);
+          
+          if (expenseForm.split.type === 'percentage') {
+            return {
+              personName: person.name,
+              percentage: existingDetail?.percentage || 100 / expensesData.people.length,
+              included: existingDetail?.included !== false // Default to included
+            };
+          } else { // custom split
+            return {
+              personName: person.name,
+              amount: existingDetail?.amount || amount / expensesData.people.length,
+              included: existingDetail?.included !== false // Default to included
+            };
+          }
+        });
+        
+        setExpenseForm(prev => ({
+          ...prev,
+          [name]: value,
+          split: {
+            ...prev.split,
+            details: splitDetails
+          }
+        }));
+        return;
+      }
+    }
+    
     setExpenseForm(prev => ({
       ...prev,
       [name]: value
     }));
+  };
+
+  // Handle split type change
+  const handleSplitTypeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const splitType = e.target.value as 'equal' | 'custom' | 'percentage';
+    
+    // Generate new split details based on the selected type
+    let splitDetails: {
+      personName: string;
+      amount?: number;
+      percentage?: number;
+      included?: boolean;
+    }[] = [];
+    
+    if (expensesData && expensesData.people) {
+      const amount = parseFloat(expenseForm.amount);
+      
+      splitDetails = expensesData.people.map(person => {
+        const existingDetail = expenseForm.split.details.find(d => d.personName === person.name);
+        const included = existingDetail?.included !== false; // Default to included
+        
+        if (splitType === 'percentage') {
+          return {
+            personName: person.name,
+            percentage: included ? 100 / expensesData.people.length : 0,
+            included
+          };
+        } else if (splitType === 'custom' && !isNaN(amount)) {
+          return {
+            personName: person.name,
+            amount: included ? amount / expensesData.people.length : 0,
+            included
+          };
+        } else {
+          return {
+            personName: person.name,
+            included
+          };
+        }
+      });
+    }
+    
+    setExpenseForm(prev => ({
+      ...prev,
+      split: {
+        type: splitType,
+        details: splitDetails
+      }
+    }));
+  };
+
+  // Handle person inclusion in split
+  const handlePersonIncluded = (personName: string, included: boolean) => {
+    setExpenseForm(prev => {
+      const amount = parseFloat(prev.amount);
+      const newDetails = [...prev.split.details];
+      const index = newDetails.findIndex(d => d.personName === personName);
+      
+      if (index !== -1) {
+        newDetails[index] = {
+          ...newDetails[index],
+          included
+        };
+        
+        // Recalculate amounts/percentages for included people
+        const includedCount = newDetails.filter(d => d.included).length;
+        
+        if (prev.split.type === 'percentage' && includedCount > 0) {
+          // Distribute percentages evenly among included people
+          newDetails.forEach(detail => {
+            if (detail.included) {
+              detail.percentage = 100 / includedCount;
+            } else {
+              detail.percentage = 0;
+            }
+          });
+        } else if (prev.split.type === 'custom' && !isNaN(amount) && includedCount > 0) {
+          // Distribute amounts evenly among included people
+          newDetails.forEach(detail => {
+            if (detail.included) {
+              detail.amount = amount / includedCount;
+            } else {
+              detail.amount = 0;
+            }
+          });
+        }
+      }
+      
+      return {
+        ...prev,
+        split: {
+          ...prev.split,
+          details: newDetails
+        }
+      };
+    });
+  };
+
+  // Handle custom split amount change
+  const handleSplitAmountChange = (personName: string, value: string) => {
+    const amount = parseFloat(value);
+    
+    setExpenseForm(prev => {
+      const newDetails = [...prev.split.details];
+      const index = newDetails.findIndex(d => d.personName === personName);
+      
+      if (index !== -1 && !isNaN(amount)) {
+        if (prev.split.type === 'custom') {
+          newDetails[index] = {
+            ...newDetails[index],
+            amount
+          };
+        } else if (prev.split.type === 'percentage') {
+          newDetails[index] = {
+            ...newDetails[index],
+            percentage: amount
+          };
+        }
+      }
+      
+      return {
+        ...prev,
+        split: {
+          ...prev.split,
+          details: newDetails
+        }
+      };
+    });
+  };
+
+  // Component to display split options
+  const SplitOptions = () => {
+    const totalAmount = parseFloat(expenseForm.amount);
+    const includedPeople = expenseForm.split.details.filter(detail => detail.included !== false);
+    
+    // Calculate totals for validation
+    let totalAmountAllocated = 0;
+    let totalPercentageAllocated = 0;
+    
+    if (expenseForm.split.type === 'custom') {
+      totalAmountAllocated = expenseForm.split.details.reduce((sum, detail) => 
+        sum + (detail.amount || 0), 0);
+    } else if (expenseForm.split.type === 'percentage') {
+      totalPercentageAllocated = expenseForm.split.details.reduce((sum, detail) => 
+        sum + (detail.percentage || 0), 0);
+    }
+    
+    // Determine if inputs are valid
+    const isValid = expenseForm.split.type === 'equal' ||
+      (expenseForm.split.type === 'custom' && 
+       Math.abs(totalAmountAllocated - totalAmount) < 0.01) ||
+      (expenseForm.split.type === 'percentage' && 
+       Math.abs(totalPercentageAllocated - 100) < 0.01);
+    
+    return (
+      <Box sx={{ mt: 3 }}>
+        <FormControl component="fieldset">
+          <FormLabel component="legend" sx={{ mb: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <SplitscreenIcon sx={{ mr: 1, color: 'primary.main' }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                Split Options
+              </Typography>
+              <Tooltip title="Choose how to split this expense among participants">
+                <InfoIcon sx={{ ml: 1, fontSize: '0.9rem', color: 'text.secondary' }} />
+              </Tooltip>
+            </Box>
+          </FormLabel>
+          
+          <RadioGroup 
+            row
+            name="splitType" 
+            value={expenseForm.split.type} 
+            onChange={handleSplitTypeChange}
+            sx={{ mb: 2 }}
+          >
+            <FormControlLabel value="equal" control={<Radio />} label="Equal" />
+            <FormControlLabel value="custom" control={<Radio />} label="Custom Amount" />
+            <FormControlLabel value="percentage" control={<Radio />} label="Percentage" />
+          </RadioGroup>
+        </FormControl>
+        
+        {/* People selection for splitting */}
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Select who will share this expense
+          </Typography>
+          
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {expensesData && expensesData.people && expensesData.people.map((person) => {
+              const personDetail = expenseForm.split.details.find(d => d.personName === person.name);
+              const included = personDetail?.included !== false;
+              
+              return (
+                <Chip
+                  key={person.id}
+                  label={person.name}
+                  onClick={() => handlePersonIncluded(person.name, !included)}
+                  color={included ? "primary" : "default"}
+                  variant={included ? "filled" : "outlined"}
+                  sx={{ fontWeight: 500 }}
+                />
+              );
+            })}
+          </Box>
+        </Box>
+        
+        {/* Show custom split inputs if not equal split */}
+        {expenseForm.split.type !== 'equal' && includedPeople.length > 0 && (
+          <Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {expenseForm.split.type === 'custom' ? 'Specify amounts' : 'Specify percentages'}
+              {!isValid && (
+                <Typography 
+                  component="span" 
+                  color="error.main" 
+                  sx={{ ml: 1, fontWeight: 500 }}
+                >
+                  {expenseForm.split.type === 'custom' 
+                    ? `(Total: ${totalAmountAllocated.toFixed(2)} / ${totalAmount})` 
+                    : `(Total: ${totalPercentageAllocated.toFixed(2)}% / 100%)`}
+                </Typography>
+              )}
+            </Typography>
+            
+            <Box sx={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: 2,
+              maxHeight: '200px',
+              overflowY: 'auto',
+              pr: 1
+            }}>
+              {expenseForm.split.details
+                .filter(detail => detail.included !== false)
+                .map((detail, index) => (
+                  <Box key={detail.personName} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography sx={{ minWidth: 100 }}>{detail.personName}</Typography>
+                    <TextField
+                      size="small"
+                      type="number"
+                      value={expenseForm.split.type === 'custom' 
+                        ? detail.amount || ''
+                        : detail.percentage || ''}
+                      onChange={(e) => handleSplitAmountChange(detail.personName, e.target.value)}
+                      InputProps={{
+                        startAdornment: expenseForm.split.type === 'custom' ? (
+                          <InputAdornment position="start">QAR</InputAdornment>
+                        ) : (
+                          <InputAdornment position="start">%</InputAdornment>
+                        ),
+                      }}
+                      fullWidth
+                    />
+                  </Box>
+                ))}
+            </Box>
+          </Box>
+        )}
+      </Box>
+    );
   };
 
   // Handle back button click
@@ -512,6 +1023,50 @@ const ExpensesPage: React.FC = () => {
     } else {
       setConvertedAmount('');
     }
+  };
+
+  // Enhance ListItemText to show split information
+  const renderExpenseDetails = (expense: Expense) => {
+    // Format the split info if available
+    let splitInfo = "";
+    
+    if (expense.split) {
+      if (expense.split.type === 'equal') {
+        const includedCount = expense.split.details?.length || expensesData.people.length;
+        splitInfo = `Split equally (${includedCount} people)`;
+      } else if (expense.split.type === 'custom' && expense.split.details) {
+        const peopleCount = expense.split.details.length;
+        splitInfo = `Custom split (${peopleCount} people)`;
+      } else if (expense.split.type === 'percentage' && expense.split.details) {
+        const peopleCount = expense.split.details.length;
+        splitInfo = `Percentage split (${peopleCount} people)`;
+      }
+    }
+    
+    return (
+      <>
+        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+          {expense.description}
+        </Typography>
+        <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column' }}>
+          <Typography variant="body2" color="text.secondary" component="span">
+            {expense.date} • {expense.category}
+          </Typography>
+          
+          {splitInfo && (
+            <Typography variant="body2" color="primary.light" component="span" sx={{ mt: 0.5 }}>
+              {splitInfo}
+            </Typography>
+          )}
+          
+          {expense.paidBy !== expensesData.people[currentTab]?.name && (
+            <Typography variant="body2" color="primary" component="span" sx={{ mt: 0.5 }}>
+              • Paid by {expense.paidBy}
+            </Typography>
+          )}
+        </Box>
+      </>
+    );
   };
 
   return (
@@ -800,21 +1355,7 @@ const ExpensesPage: React.FC = () => {
                           </Box>
                           <ListItemText
                             primary={
-                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                {expense.description}
-                              </Typography>
-                            }
-                            secondary={
-                              <Box sx={{ mt: 0.5 }}>
-                                <Typography variant="body2" color="text.secondary" component="span">
-                                  {expense.date} • {expense.category}
-                                </Typography>
-                                {expense.paidBy !== expensesData.people[currentTab]?.name && (
-                                  <Typography variant="body2" color="primary" component="span" sx={{ ml: 1 }}>
-                                    • Paid by {expense.paidBy}
-                                  </Typography>
-                                )}
-                              </Box>
+                              renderExpenseDetails(expense)
                             }
                           />
                           <Box sx={{ 
@@ -930,6 +1471,10 @@ const ExpensesPage: React.FC = () => {
                 ))}
               </Select>
             </FormControl>
+            
+            {/* Add split options */}
+            <Divider sx={{ my: 1 }} />
+            <SplitOptions />
           </Box>
         </DialogContent>
         <DialogActions>
@@ -1014,7 +1559,7 @@ const ExpensesPage: React.FC = () => {
               ))}
             </Select>
           </FormControl>
-          <FormControl fullWidth>
+          <FormControl fullWidth sx={{ mb: 2 }}>
             <InputLabel id="paid-by-label-edit">Paid By</InputLabel>
             <Select
               labelId="paid-by-label-edit"
@@ -1028,6 +1573,10 @@ const ExpensesPage: React.FC = () => {
               ))}
             </Select>
           </FormControl>
+          
+          {/* Add split options to edit dialog */}
+          <Divider sx={{ my: 1 }} />
+          <SplitOptions />
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 3 }}>
           <Button 

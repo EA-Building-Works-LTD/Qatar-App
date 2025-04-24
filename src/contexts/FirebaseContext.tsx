@@ -6,6 +6,9 @@ import { ItineraryData, dohaItinerary } from '../data/itineraryData';
 import { requestNotificationPermission } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../firebase';
+import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { getDatabase } from 'firebase/database';
+import { Unsubscribe } from 'firebase/database';
 
 // Define Note type
 export interface Note {
@@ -48,6 +51,14 @@ export interface Expense {
   date: string;
   category: string;
   paidBy: string;
+  split?: {
+    type: 'equal' | 'custom' | 'percentage';
+    details?: {
+      personName: string;
+      amount?: number;
+      percentage?: number;
+    }[];
+  };
 }
 
 export interface Person {
@@ -145,7 +156,7 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
 
   // Listen for auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       setIsAuthenticated(!!user);
       setLoading(false);
@@ -285,105 +296,67 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
           console.error("Error loading notes:", error);
         });
         
-        // Set up listener for shared expenses data
+        // Set up listener for shared expenses data with user profiles
         const sharedExpensesDataRef = ref(database, `shared/${SHARED_TRIP_ID}/expensesData`);
         const expensesUnsubscribe = onValue(sharedExpensesDataRef, async (snapshot) => {
           if (snapshot.exists()) {
             setExpensesData(snapshot.val());
           } else {
-            // Get all users who have profiles
-            try {
-              const usersRef = ref(database, 'users');
-              const usersSnapshot = await get(usersRef);
-              
-              if (usersSnapshot.exists()) {
-                const users = usersSnapshot.val();
-                const userProfiles: UserProfile[] = [];
-                
-                // Collect user profiles
-                Object.entries(users).forEach(([uid, userData]: [string, any]) => {
-                  if (userData.userProfile) {
-                    userProfiles.push({
-                      ...userData.userProfile,
-                      uid // Add the user ID for reference
-                    });
-                  }
-                });
-                
-                // Create people array from user profiles
-                const people = userProfiles.map((profile, index) => ({
-                  id: index + 1,
-                  name: profile.name,
-                  email: profile.email,
-                  expenses: []
-                }));
-                
-                // If no users found, use default with current user
-                if (people.length === 0) {
-                  people.push({
-                    id: 1,
-                    name: user.displayName || 'User',
-                    email: user.email || '',
-                    expenses: []
-                  });
-                }
-                
-                // Ensure we have at least 3 entries for UI layout
-                while (people.length < 3) {
-                  people.push({
-                    id: people.length + 1,
-                    name: `Travel Companion ${people.length}`,
-                    email: '',
-                    expenses: []
-                  });
-                }
-                
-                const defaultExpensesData = {
-                  people,
-                  totalSpent: 0
-                };
-                
-                setExpensesData(defaultExpensesData);
-                // Save default expenses data to Firebase
-                set(sharedExpensesDataRef, defaultExpensesData).catch(err => {
-                  console.error("Error setting default expenses data:", err);
-                });
-              } else {
-                // Fallback to default if no users found
-                const defaultExpensesData = {
-                  people: [
-                    { id: 1, name: user.displayName || 'User', email: user.email || '', expenses: [] },
-                    { id: 2, name: 'Travel Companion 1', email: '', expenses: [] },
-                    { id: 3, name: 'Travel Companion 2', email: '', expenses: [] }
-                  ],
-                  totalSpent: 0
-                };
-                setExpensesData(defaultExpensesData);
-                // Save default expenses data to Firebase
-                set(sharedExpensesDataRef, defaultExpensesData).catch(err => {
-                  console.error("Error setting default expenses data:", err);
-                });
-              }
-            } catch (error) {
-              console.error("Error getting users for expenses data:", error);
-              // Fallback to default if error occurs
-              const defaultExpensesData = {
-                people: [
-                  { id: 1, name: user.displayName || 'User', email: user.email || '', expenses: [] },
-                  { id: 2, name: 'Travel Companion 1', email: '', expenses: [] },
-                  { id: 3, name: 'Travel Companion 2', email: '', expenses: [] }
-                ],
-                totalSpent: 0
-              };
-              setExpensesData(defaultExpensesData);
-              // Save default expenses data to Firebase
-              set(sharedExpensesDataRef, defaultExpensesData).catch(err => {
-                console.error("Error setting default expenses data:", err);
+            // Initialize with actual user profiles
+            const userProfiles = await fetchUserProfiles();
+            
+            // Create people array from user profiles
+            let people = userProfiles.map((profile, index) => ({
+              id: index + 1,
+              name: profile.name,
+              email: profile.email,
+              expenses: []
+            }));
+
+            // If no users found, use default with current user
+            if (people.length === 0 && user) {
+              people.push({
+                id: 1,
+                name: user.displayName || 'User',
+                email: user.email || '',
+                expenses: []
               });
             }
+
+            // Always ensure current user is in the list if authenticated
+            if (user && user.displayName) {
+              const currentUserExists = people.some(p => p.email === user.email);
+              
+              if (!currentUserExists) {
+                people.push({
+                  id: people.length + 1,
+                  name: user.displayName || 'User',
+                  email: user.email || '',
+                  expenses: []
+                });
+              }
+            }
+
+            // Ensure we have at least the default entries for UI layout
+            if (people.length === 0) {
+              people = [
+                { id: 1, name: 'Ehsaan', email: 'ehsaan.sheikh@gmail.com', expenses: [] },
+                { id: 2, name: 'Amar', email: 'amar@example.com', expenses: [] },
+                { id: 3, name: 'Wahees', email: 'wahees@example.com', expenses: [] }
+              ];
+            }
+
+            const defaultExpensesData = {
+              people,
+              totalSpent: 0
+            };
+
+            setExpensesData(defaultExpensesData);
+            // Save default expenses data to Firebase
+            set(sharedExpensesDataRef, defaultExpensesData).catch(err => {
+              console.error("Error setting default expenses data:", err);
+            });
           }
-        }, (error) => {
-          console.error("Error loading expenses data:", error);
         });
         
         // Set up listener for shared itinerary data
@@ -906,6 +879,34 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error("Error updating current page:", errorMessage);
       // Don't throw the error, just log it
+    }
+  };
+
+  // Add a function to fetch all user profiles
+  const fetchUserProfiles = async () => {
+    try {
+      const db = getDatabase();
+      const profilesRef = ref(db, 'userProfiles');
+      const snapshot = await get(profilesRef);
+      
+      if (snapshot.exists()) {
+        const profiles: Array<{uid: string, name: string, email: string}> = [];
+        snapshot.forEach((childSnapshot) => {
+          const profile = childSnapshot.val();
+          if (profile.name) { // Only include profiles with names
+            profiles.push({
+              uid: childSnapshot.key,
+              name: profile.name,
+              email: profile.email || ''
+            });
+          }
+        });
+        return profiles;
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching user profiles:', error);
+      return [];
     }
   };
 
