@@ -79,12 +79,57 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
   
   // Calculate countdown to trip
   useEffect(() => {
-    // Set the target date - May 14, 2025 at 14:35
-    // Using explicit year, month (0-based), day, hours, minutes
-    const targetDate = new Date(2025, 4, 14, 14, 35, 0, 0);
+    // Extract flight date and time from the outbound flight info if available
+    // Format of outbound flight: "MAN → DOH (08:15 AM - 17:05 PM)"
+    const flightInfo = itineraryData?.flightDetails?.outbound || '';
+    const flightDateStr = itineraryData?.days?.[0]?.date || "14 May 2025";
     
-    // Calculate trip duration (May 14-21, 2025 = 7 nights)
-    const tripDuration = 7;
+    // Parse time from flight info if available, otherwise use default
+    let flightHour = 8;
+    let flightMinute = 15;
+    
+    if (flightInfo) {
+      const timeMatch = flightInfo.match(/\((\d{2}):(\d{2})\s*(?:AM|PM)/i);
+      if (timeMatch) {
+        flightHour = parseInt(timeMatch[1], 10);
+        flightMinute = parseInt(timeMatch[2], 10);
+        
+        // Adjust for PM if needed (not using 24-hour format)
+        if (flightInfo.includes('PM') && flightHour < 12) {
+          flightHour += 12;
+        }
+      }
+    }
+    
+    // Parse date from flight date string
+    const dateParts = flightDateStr.split(' ');
+    const day = parseInt(dateParts[0], 10);
+    const monthStr = dateParts[1];
+    const year = parseInt(dateParts[2], 10);
+    
+    // Map month name to month number (0-based)
+    const monthMap: {[key: string]: number} = {
+      'Jan': 0, 'January': 0,
+      'Feb': 1, 'February': 1,
+      'Mar': 2, 'March': 2,
+      'Apr': 3, 'April': 3,
+      'May': 4,
+      'Jun': 5, 'June': 5,
+      'Jul': 6, 'July': 6,
+      'Aug': 7, 'August': 7,
+      'Sep': 8, 'September': 8,
+      'Oct': 9, 'October': 9,
+      'Nov': 10, 'November': 10,
+      'Dec': 11, 'December': 11
+    };
+    
+    const month = monthMap[monthStr] || 4; // Default to May (4) if not found
+    
+    // Set the target date using parsed information
+    const targetDate = new Date(year, month, day, flightHour, flightMinute, 0, 0);
+    
+    // Calculate trip duration based on itinerary dates
+    const tripDuration = itineraryData?.days?.length || 7;
     
     const updateCountdown = () => {
       // Get current date and time
@@ -121,7 +166,7 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
     
     // Clean up interval on component unmount
     return () => clearInterval(interval);
-  }, []);
+  }, [itineraryData]);
   
   // Handle adding a new note
   const handleAddNote = async () => {
@@ -430,7 +475,7 @@ const HomePage: React.FC<HomePageProps> = ({ itineraryData, onNavigateToDay, onT
             </Box>
             
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Flight on May 14, 2025 at 14:35
+              {itineraryData.flightDetails.outbound}
             </Typography>
             
             {/* Progress bar - calculate percentage based on actual time remaining */}

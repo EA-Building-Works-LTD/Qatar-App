@@ -23,6 +23,7 @@ export interface UserProfile {
   name: string;
   email: string;
   avatar: string;
+  isAdmin: boolean;
 }
 
 // Define NotificationSettings type
@@ -111,7 +112,8 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
   const [userProfile, setUserProfile] = useState<UserProfile>({
     name: 'Guest User',
     email: 'guest@example.com',
-    avatar: 'G'
+    avatar: 'G',
+    isAdmin: false
   });
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
     email: true,
@@ -159,10 +161,13 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
             setUserProfile(snapshot.val());
           } else {
             // Initialize with default profile if none exists
+            // Set isAdmin to true only for your email
+            const isAdmin = user.email === 'ehsaan.sheikh@gmail.com'; // Replace with your actual email
             const defaultProfile = {
               name: user.displayName || 'User',
               email: user.email || 'user@example.com',
-              avatar: user.displayName ? user.displayName.charAt(0).toUpperCase() : 'U'
+              avatar: user.displayName ? user.displayName.charAt(0).toUpperCase() : 'U',
+              isAdmin: isAdmin
             };
             setUserProfile(defaultProfile);
             // Save default profile to Firebase
@@ -282,24 +287,100 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         
         // Set up listener for shared expenses data
         const sharedExpensesDataRef = ref(database, `shared/${SHARED_TRIP_ID}/expensesData`);
-        const expensesUnsubscribe = onValue(sharedExpensesDataRef, (snapshot) => {
+        const expensesUnsubscribe = onValue(sharedExpensesDataRef, async (snapshot) => {
           if (snapshot.exists()) {
             setExpensesData(snapshot.val());
           } else {
-            // Initialize with default expenses data if none exist
-            const defaultExpensesData = {
-              people: [
-                { id: 1, name: user.displayName || 'User', expenses: [] },
-                { id: 2, name: 'Travel Companion 1', expenses: [] },
-                { id: 3, name: 'Travel Companion 2', expenses: [] }
-              ],
-              totalSpent: 0
-            };
-            setExpensesData(defaultExpensesData);
-            // Save default expenses data to Firebase
-            set(sharedExpensesDataRef, defaultExpensesData).catch(err => {
-              console.error("Error setting default expenses data:", err);
-            });
+            // Get all users who have profiles
+            try {
+              const usersRef = ref(database, 'users');
+              const usersSnapshot = await get(usersRef);
+              
+              if (usersSnapshot.exists()) {
+                const users = usersSnapshot.val();
+                const userProfiles: UserProfile[] = [];
+                
+                // Collect user profiles
+                Object.entries(users).forEach(([uid, userData]: [string, any]) => {
+                  if (userData.userProfile) {
+                    userProfiles.push({
+                      ...userData.userProfile,
+                      uid // Add the user ID for reference
+                    });
+                  }
+                });
+                
+                // Create people array from user profiles
+                const people = userProfiles.map((profile, index) => ({
+                  id: index + 1,
+                  name: profile.name,
+                  email: profile.email,
+                  expenses: []
+                }));
+                
+                // If no users found, use default with current user
+                if (people.length === 0) {
+                  people.push({
+                    id: 1,
+                    name: user.displayName || 'User',
+                    email: user.email || '',
+                    expenses: []
+                  });
+                }
+                
+                // Ensure we have at least 3 entries for UI layout
+                while (people.length < 3) {
+                  people.push({
+                    id: people.length + 1,
+                    name: `Travel Companion ${people.length}`,
+                    email: '',
+                    expenses: []
+                  });
+                }
+                
+                const defaultExpensesData = {
+                  people,
+                  totalSpent: 0
+                };
+                
+                setExpensesData(defaultExpensesData);
+                // Save default expenses data to Firebase
+                set(sharedExpensesDataRef, defaultExpensesData).catch(err => {
+                  console.error("Error setting default expenses data:", err);
+                });
+              } else {
+                // Fallback to default if no users found
+                const defaultExpensesData = {
+                  people: [
+                    { id: 1, name: user.displayName || 'User', email: user.email || '', expenses: [] },
+                    { id: 2, name: 'Travel Companion 1', email: '', expenses: [] },
+                    { id: 3, name: 'Travel Companion 2', email: '', expenses: [] }
+                  ],
+                  totalSpent: 0
+                };
+                setExpensesData(defaultExpensesData);
+                // Save default expenses data to Firebase
+                set(sharedExpensesDataRef, defaultExpensesData).catch(err => {
+                  console.error("Error setting default expenses data:", err);
+                });
+              }
+            } catch (error) {
+              console.error("Error getting users for expenses data:", error);
+              // Fallback to default if error occurs
+              const defaultExpensesData = {
+                people: [
+                  { id: 1, name: user.displayName || 'User', email: user.email || '', expenses: [] },
+                  { id: 2, name: 'Travel Companion 1', email: '', expenses: [] },
+                  { id: 3, name: 'Travel Companion 2', email: '', expenses: [] }
+                ],
+                totalSpent: 0
+              };
+              setExpensesData(defaultExpensesData);
+              // Save default expenses data to Firebase
+              set(sharedExpensesDataRef, defaultExpensesData).catch(err => {
+                console.error("Error setting default expenses data:", err);
+              });
+            }
           }
         }, (error) => {
           console.error("Error loading expenses data:", error);
@@ -361,7 +442,8 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
       setUserProfile({
         name: 'Guest User',
         email: 'guest@example.com',
-        avatar: 'G'
+        avatar: 'G',
+        isAdmin: false
       });
       setNotificationSettings({
         email: true,
